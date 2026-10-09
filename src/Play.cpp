@@ -5,7 +5,7 @@
 
 void setCascade(CCNode* node) {
     if (!node) return;
-    if (auto rgba = typeinfo_cast<CCRGBAProtocol*>(node)) {
+    if (auto rgba = dynamic_cast<CCRGBAProtocol*>(node)) {
         rgba->setCascadeOpacityEnabled(true);
     }
     if (!node->getChildren()) return;

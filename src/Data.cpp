@@ -2,6 +2,7 @@
 #include <Geode/utils/base64.hpp>
 #include <miniz.h>
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <map>
 #include <sstream>

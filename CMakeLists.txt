@@ -16,6 +16,7 @@ endif()
 
 add_subdirectory($ENV{GEODE_SDK} ${CMAKE_CURRENT_BINARY_DIR}/geode)
 
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 CPMAddPackage(
     NAME miniz
     GITHUB_REPOSITORY richgel999/miniz
