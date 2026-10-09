@@ -265,9 +265,13 @@ class $modify(StudioPlayLayer, PlayLayer) {
 
     // ------------------------------------------------------------ attempts
 
+    bool playerIsDead() {
+        return m_playerDied || (m_player1 && m_player1->m_isDead);
+    }
+
     void resetLevel() {
         auto f = m_fields.self();
-        this->finishAttempt(false, false);
+        this->finishAttempt(this->playerIsDead(), false);
         if (f->managed) m_isTestMode = m_startPosObject != nullptr;
         PlayLayer::resetLevel();
         this->beginAttempt();
@@ -342,10 +346,9 @@ class $modify(StudioPlayLayer, PlayLayer) {
     }
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
-        bool wasDead = m_player1 && m_player1->m_isDead;
         PlayLayer::destroyPlayer(player, object);
         if (object == m_anticheatSpike) return;
-        if (!wasDead && m_player1 && m_player1->m_isDead) this->finishAttempt(true, false);
+        if (this->playerIsDead()) this->finishAttempt(true, false);
     }
 
     void levelComplete() {
@@ -385,9 +388,11 @@ class $modify(StudioPlayLayer, PlayLayer) {
                 });
             }
         }
-        if (!m_player1 || m_isPaused) return;
+        if (!m_player1) return;
+        if (f->recording && f->attemptTime > 0.1f && this->playerIsDead()) this->finishAttempt(true, false);
+        if (m_isPaused) return;
         if (!f->recording) {
-            if (m_player1->m_isDead || m_hasCompletedLevel) return;
+            if (this->playerIsDead() || m_hasCompletedLevel) return;
             this->beginAttempt();
         }
         f->attemptTime += dt;

@@ -5,7 +5,7 @@
 	},
 	"id": "traxcerd.startpos-studio",
 	"name": "StartPos Studio",
-	"version": "v1.1.0",
+	"version": "v1.1.1",
 	"developer": "Traxcerd",
 	"description": "Pick your StartPos before playing, switch it in-game and place new ones with one key",
 	"tags": [

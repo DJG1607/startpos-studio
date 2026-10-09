@@ -481,10 +481,17 @@ void MapPopup::onZoom(float factor) {
 void MapPopup::onToggleDeaths() {
     m_showDeaths = !m_showDeaths;
     Mod::get()->setSavedValue<bool>("map-deaths", m_showDeaths);
-    auto spr = ButtonSprite::create(m_showDeaths ? "Deaths: on" : "Deaths: off", "bigFont.fnt", "GJ_button_04.png", 0.8f);
-    spr->setScale(0.42f);
-    m_deathsBtn->setNormalImage(spr);
+    // change only the text, so the button stays where it is
+    if (auto spr = typeinfo_cast<ButtonSprite*>(m_deathsBtn->getNormalImage())) {
+        spr->setString(m_showDeaths ? "Deaths: on" : "Deaths: off");
+    }
     this->redraw();
+    auto& runs = runData(m_level);
+    if (m_showDeaths) {
+        Notification::create(runs.deathPoints.empty() ? std::string("No deaths saved yet in this level")
+                                                      : fmt::format("Showing {} deaths", runs.deathPoints.size()),
+                             NotificationIcon::Info)->show();
+    }
 }
 
 bool MapPopup::ccTouchBegan(CCTouch* touch, CCEvent* event) {
