@@ -30,7 +30,7 @@ namespace {
         if (!obj->m_startSettings) obj->setSettings(LevelSettingsObject::create());
         applyState(obj->m_startSettings, c.state);
         obj->setPosition({c.x, c.y});
-        obj->m_startPosition = {c.x, c.y};
+        obj->m_startPosition = CCPoint(c.x, c.y);
         return obj;
     }
 }
