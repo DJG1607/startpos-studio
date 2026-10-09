@@ -452,11 +452,10 @@ class $modify(StudioPlayLayer, PlayLayer) {
             f->deathNode = CCDrawNode::create();
             f->deathNode->setID("death-marks"_spr);
             parent->addChild(f->deathNode, m_player1->getZOrder() - 2);
-            if (setting("show-deaths")) {
-                auto& pts = runData(m_level).deathPoints;
-                size_t from = pts.size() > 600 ? pts.size() - 600 : 0;
-                for (size_t i = from; i < pts.size(); i++) this->drawDeath(pts[i]);
-            }
+            auto& pts = runData(m_level).deathPoints;
+            size_t from = pts.size() > 600 ? pts.size() - 600 : 0;
+            for (size_t i = from; i < pts.size(); i++) this->drawDeath(pts[i]);
+            f->deathNode->setVisible(deathsVisible());
         }
         if (!f->ghost) {
             auto gm = GameManager::get();
@@ -472,7 +471,7 @@ class $modify(StudioPlayLayer, PlayLayer) {
 
     void drawDeath(CCPoint p) {
         auto f = m_fields.self();
-        if (!f->deathNode || !setting("show-deaths")) return;
+        if (!f->deathNode) return;
         ccColor4F red = {1.f, 0.2f, 0.2f, 0.55f};
         float r = 6.f;
         f->deathNode->drawSegment({p.x - r, p.y - r}, {p.x + r, p.y + r}, 1.4f, red);
@@ -678,6 +677,12 @@ bool studioPlaying() {
 
 void studioSwitchToX(float x) {
     if (auto pl = PlayLayer::get()) static_cast<StudioPlayLayer*>(pl)->switchToX(x);
+}
+
+void studioDeathsChanged() {
+    auto pl = PlayLayer::get();
+    if (!pl || !pl->m_player1 || !pl->m_player1->getParent()) return;
+    if (auto node = pl->m_player1->getParent()->getChildByID("death-marks"_spr)) node->setVisible(deathsVisible());
 }
 
 void studioRebuild() {

@@ -133,8 +133,13 @@ int importShareCode(LevelData& data, std::string const& code, bool& otherLevel);
 
 bool setting(char const* key);
 
+// One switch for the red X of your deaths, in the map and in the level (off by default).
+bool deathsVisible();
+void setDeathsVisible(bool visible);
+
 // In-level helpers (Play.cpp). They do nothing when you are not in a level.
 bool studioPlaying();
 void studioSwitchToX(float x);  // x < 0 = from the beginning
 void studioRebuild();           // reload your own StartPos after a change in the map
 void setCascade(CCNode* node);  // makes a whole node tree fade together
+void studioDeathsChanged();     // shows or hides the red X in the level

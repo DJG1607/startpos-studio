@@ -5,7 +5,7 @@
 	},
 	"id": "traxcerd.startpos-studio",
 	"name": "StartPos Studio",
-	"version": "v1.1.1",
+	"version": "v1.1.2",
 	"developer": "Traxcerd",
 	"description": "Pick your StartPos before playing, switch it in-game and place new ones with one key",
 	"tags": [
@@ -107,12 +107,6 @@
 			"name": "Ghost of your best run",
 			"description": "A see-through copy of your icon plays your best run from the same StartPos, so you can race it.",
 			"default": true
-		},
-		"show-deaths": {
-			"type": "bool",
-			"name": "Show where you died",
-			"description": "Draws a red X in the level everywhere you have died. Off by default; on the map there is a Deaths button too.",
-			"default": false
 		}
 	}
 }

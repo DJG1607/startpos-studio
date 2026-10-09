@@ -17,7 +17,7 @@ The mod records your attempts, like a bot: your path and every jump.
 - The map shows **only your best try** as one line (colour = gamemode), each jump as a white dot. If you got further in practice or from a StartPos, the line continues with that try.
 - **Tap your line** (or a jump) and press **Place here**: the StartPos gets the gamemode, speed, size and gravity you had there.
 - A **ghost** of your best try plays next to you.
-- Deaths are **optional**: press **Deaths** on the map, or turn on "Show where you died" in the settings to see red X in the level.
+- Deaths are **optional** and off by default: the **Deaths** button on the map (also in the pause menu) shows or hides the red X, on the map and in the level.
 
 ## Share
 **Copy code** puts your StartPos in a code (starts with `SPS1:`). Post it in the level comments or on Discord.

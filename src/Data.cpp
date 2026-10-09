@@ -112,6 +112,14 @@ bool setting(char const* key) {
     return Mod::get()->getSettingValue<bool>(key);
 }
 
+bool deathsVisible() {
+    return Mod::get()->getSavedValue<bool>("map-deaths", false);
+}
+
+void setDeathsVisible(bool visible) {
+    Mod::get()->setSavedValue<bool>("map-deaths", visible);
+}
+
 // ---------------------------------------------------------------- keys
 
 std::string levelKey(GJGameLevel* level) {

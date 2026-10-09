@@ -90,33 +90,43 @@ bool MapPopup::init(GJGameLevel* level, From from, CCNode* owner) {
     m_info->setPosition({220.f, 72.f});
     m_mainLayer->addChild(m_info);
 
+    // all the buttons live in one menu with fixed positions (popup coordinates)
+    auto menu = CCMenu::create();
+    menu->setPosition({0.f, 0.f});
+    m_mainLayer->addChild(menu, 10);
+    auto put = [menu](CCMenuItemSpriteExtra* item, float x, float y) {
+        item->setPosition({x, y});
+        menu->addChild(item);
+    };
+
     // row 1: choose StartPos, play, place, delete
-    m_buttonMenu->addChildAtPosition(arrowButton(false, 0.45f, [this](auto) { this->selectStart(m_sel - 1); }), Anchor::BottomLeft, {32.f, 46.f});
-    m_buttonMenu->addChildAtPosition(arrowButton(true, 0.45f, [this](auto) { this->selectStart(m_sel + 1); }), Anchor::BottomLeft, {66.f, 46.f});
+    put(arrowButton(false, 0.45f, [this](auto) { this->selectStart(m_sel - 1); }), 32.f, 46.f);
+    put(arrowButton(true, 0.45f, [this](auto) { this->selectStart(m_sel + 1); }), 66.f, 46.f);
     m_playBtn = textButton(m_from == From::Pause ? "Go" : "Play", "GJ_button_01.png", 0.6f, [this](auto) { this->onPlay(); });
-    m_buttonMenu->addChildAtPosition(m_playBtn, Anchor::BottomLeft, {130.f, 46.f});
+    put(m_playBtn, 130.f, 46.f);
     m_placeBtn = textButton("Place here", "GJ_button_02.png", 0.55f, [this](auto) { this->onPlace(); });
-    m_buttonMenu->addChildAtPosition(m_placeBtn, Anchor::BottomLeft, {240.f, 46.f});
+    put(m_placeBtn, 240.f, 46.f);
     m_deleteBtn = textButton("Delete", "GJ_button_06.png", 0.55f, [this](auto) { this->onDelete(); });
-    m_buttonMenu->addChildAtPosition(m_deleteBtn, Anchor::BottomLeft, {360.f, 46.f});
+    put(m_deleteBtn, 360.f, 46.f);
 
     // row 2: which run you see, zoom, share codes
-    m_showDeaths = Mod::get()->getSavedValue<bool>("map-deaths", false);
+    m_showDeaths = deathsVisible();
     m_deathsBtn = textButton(m_showDeaths ? "Deaths: on" : "Deaths: off", "GJ_button_04.png", 0.42f, [this](auto) { this->onToggleDeaths(); });
-    m_buttonMenu->addChildAtPosition(m_deathsBtn, Anchor::BottomLeft, {48.f, 18.f});
+    put(m_deathsBtn, 56.f, 18.f);
     m_runLabel = CCLabelBMFont::create("", "bigFont.fnt");
     m_runLabel->setPosition({165.f, 18.f});
     m_mainLayer->addChild(m_runLabel);
-    m_buttonMenu->addChildAtPosition(textButton("-", "GJ_button_04.png", 0.5f, [this](auto) { this->onZoom(1.f / 1.5f); }), Anchor::BottomLeft, {256.f, 18.f});
-    m_buttonMenu->addChildAtPosition(textButton("+", "GJ_button_04.png", 0.5f, [this](auto) { this->onZoom(1.5f); }), Anchor::BottomLeft, {286.f, 18.f});
-    m_buttonMenu->addChildAtPosition(textButton("Copy code", "GJ_button_04.png", 0.42f, [this](auto) { this->onCopy(); }), Anchor::BottomLeft, {340.f, 18.f});
-    m_buttonMenu->addChildAtPosition(textButton("Paste", "GJ_button_04.png", 0.42f, [this](auto) { this->onPaste(); }), Anchor::BottomLeft, {404.f, 18.f});
+    put(textButton("-", "GJ_button_04.png", 0.5f, [this](auto) { this->onZoom(1.f / 1.5f); }), 256.f, 18.f);
+    put(textButton("+", "GJ_button_04.png", 0.5f, [this](auto) { this->onZoom(1.5f); }), 286.f, 18.f);
+    put(textButton("Copy code", "GJ_button_04.png", 0.42f, [this](auto) { this->onCopy(); }), 340.f, 18.f);
+    put(textButton("Paste", "GJ_button_04.png", 0.42f, [this](auto) { this->onPaste(); }), 404.f, 18.f);
 
     m_line = bestLine(runData(m_level));
     this->reload();
     float fx = m_sel > 0 ? m_starts[m_sel - 1].x : 0.f;
     float fy = m_sel > 0 ? m_starts[m_sel - 1].y : 105.f;
     this->focusX(fx, fy);
+    handleTouchPriority(this);
     return true;
 }
 
@@ -480,10 +490,13 @@ void MapPopup::onZoom(float factor) {
 
 void MapPopup::onToggleDeaths() {
     m_showDeaths = !m_showDeaths;
-    Mod::get()->setSavedValue<bool>("map-deaths", m_showDeaths);
+    setDeathsVisible(m_showDeaths);
+    studioDeathsChanged();
     // change only the text, so the button stays where it is
     if (auto spr = typeinfo_cast<ButtonSprite*>(m_deathsBtn->getNormalImage())) {
         spr->setString(m_showDeaths ? "Deaths: on" : "Deaths: off");
+        m_deathsBtn->setContentSize(spr->getScaledContentSize());
+        spr->setPosition(m_deathsBtn->getContentSize() / 2);
     }
     this->redraw();
     auto& runs = runData(m_level);
