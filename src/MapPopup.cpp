@@ -65,6 +65,10 @@ bool MapPopup::init(GJGameLevel* level, From from, CCNode* owner) {
     m_canvas->addChild(m_overlay, 5);
     m_labels = CCNode::create();
     m_canvas->addChild(m_labels, 6);
+    m_endLabel = CCLabelBMFont::create("END", "bigFont.fnt");
+    m_endLabel->setScale(0.3f);
+    m_endLabel->setColor({255, 90, 90});
+    m_canvas->addChild(m_endLabel, 7);
     auto frame = CCDrawNode::create();
     CCPoint a = m_mapOrigin, b = m_mapOrigin + CCPoint(m_mapSize.width, m_mapSize.height);
     frame->drawRect(a, b, {0, 0, 0, 0}, 1.f, {1, 1, 1, 0.35f});
@@ -80,7 +84,7 @@ bool MapPopup::init(GJGameLevel* level, From from, CCNode* owner) {
     legend->setScale(0.48f);
     legend->setPosition({220.f, 249.f});
     m_mainLayer->addChild(legend);
-    auto hint = CCLabelBMFont::create("Drag to move.  Tap a flag to start there.  Tap your line or a jump to put a StartPos there.", "chatFont.fnt");
+    auto hint = CCLabelBMFont::create("Drag to move.  Tap a flag to start there.  Tap your line to put a StartPos.  Set end = where that part finishes.", "chatFont.fnt");
     hint->setScale(0.48f);
     hint->setColor({255, 230, 120});
     hint->setPosition({220.f, 86.f});
@@ -103,18 +107,22 @@ bool MapPopup::init(GJGameLevel* level, From from, CCNode* owner) {
     put(arrowButton(false, 0.45f, [this](auto) { this->selectStart(m_sel - 1); }), 32.f, 46.f);
     put(arrowButton(true, 0.45f, [this](auto) { this->selectStart(m_sel + 1); }), 66.f, 46.f);
     m_playBtn = textButton(m_from == From::Pause ? "Go" : "Play", "GJ_button_01.png", 0.6f, [this](auto) { this->onPlay(); });
-    put(m_playBtn, 130.f, 46.f);
-    m_placeBtn = textButton("Place here", "GJ_button_02.png", 0.55f, [this](auto) { this->onPlace(); });
-    put(m_placeBtn, 240.f, 46.f);
-    m_deleteBtn = textButton("Delete", "GJ_button_06.png", 0.55f, [this](auto) { this->onDelete(); });
-    put(m_deleteBtn, 360.f, 46.f);
+    put(m_playBtn, 118.f, 46.f);
+    m_endBtn = textButton("Set end", "GJ_button_05.png", 0.5f, [this](auto) { this->onSetEnd(); });
+    put(m_endBtn, 192.f, 46.f);
+    m_placeBtn = textButton("Place here", "GJ_button_02.png", 0.5f, [this](auto) { this->onPlace(); });
+    put(m_placeBtn, 282.f, 46.f);
+    m_deleteBtn = textButton("Delete", "GJ_button_06.png", 0.5f, [this](auto) { this->onDelete(); });
+    put(m_deleteBtn, 372.f, 46.f);
 
     // row 2: which run you see, zoom, share codes
     m_showDeaths = deathsVisible();
     m_deathsBtn = textButton(m_showDeaths ? "Deaths: on" : "Deaths: off", "GJ_button_04.png", 0.42f, [this](auto) { this->onToggleDeaths(); });
     put(m_deathsBtn, 56.f, 18.f);
+    m_watchBtn = textButton("Watch", "GJ_button_01.png", 0.42f, [this](auto) { this->onWatch(); });
+    put(m_watchBtn, 140.f, 18.f);
     m_runLabel = CCLabelBMFont::create("", "bigFont.fnt");
-    m_runLabel->setPosition({165.f, 18.f});
+    m_runLabel->setVisible(false);
     m_mainLayer->addChild(m_runLabel);
     put(textButton("-", "GJ_button_04.png", 0.5f, [this](auto) { this->onZoom(1.f / 1.5f); }), 256.f, 18.f);
     put(textButton("+", "GJ_button_04.png", 0.5f, [this](auto) { this->onZoom(1.5f); }), 286.f, 18.f);
@@ -157,10 +165,13 @@ void MapPopup::updateStats() {
         std::vector<int> bins(101, 0);
         for (auto& p : runs.deathPoints) bins[pct(p.x)]++;
         int worst = static_cast<int>(std::max_element(bins.begin(), bins.end()) - bins.begin());
-        text += fmt::format("   Most deaths at {}%", worst);
+        if (m_showDeaths) text += fmt::format("   Most deaths at {}%", worst);
     }
+    if (m_line.path.empty()) text += "   No tries yet";
+    else text += fmt::format("   Best try: {}% to {}% ({} jumps)", pct(m_line.from), m_line.completed ? 100 : pct(m_line.to),
+                             m_line.clicks.size());
     m_stats->setString(text.c_str());
-    m_stats->limitLabelWidth(400.f, 0.42f, 0.1f);
+    m_stats->limitLabelWidth(410.f, 0.42f, 0.1f);
 
     if (m_line.path.empty()) {
         m_runLabel->setString("No tries yet: play the level!");
@@ -243,17 +254,57 @@ void MapPopup::redraw() {
         l->setPosition({p.x + 4, p.y + 21});
         m_labels->addChild(l);
     };
+    auto& data = levelData(m_level);
+    auto doneMark = [&](float x, float y) {
+        auto it = data.done.find(sectionKey(x));
+        if (it == data.done.end() || it->second <= 0) return;
+        auto p = toMap(x, y);
+        auto l = CCLabelBMFont::create(fmt::format("done x{}", it->second).c_str(), "bigFont.fnt");
+        l->setScale(0.22f);
+        l->setColor({90, 255, 90});
+        l->setPosition({p.x + 4, p.y - 9});
+        m_labels->addChild(l);
+    };
     flag(0, LEVEL_Y_OFFSET + 15, {0.35f, 1, 0.35f, 1}, "Start");
+    doneMark(0, LEVEL_Y_OFFSET + 15);
     for (size_t i = 0; i < m_starts.size(); i++) {
         auto& e = m_starts[i];
         ccColor4F c = e.custom ? ccColor4F{0.25f, 0.9f, 1, 1} : e.fixed ? ccColor4F{1, 0.85f, 0.2f, 1} : ccColor4F{1, 1, 1, 1};
         flag(e.x, e.y, c, fmt::format("{}", i + 1));
+        doneMark(e.x, e.y);
     }
     this->drawOverlay();
 }
 
+float MapPopup::selStart() const {
+    return m_sel == 0 ? 0.f : m_starts[m_sel - 1].x;
+}
+
+float MapPopup::selEnd() const {
+    std::vector<float> xs;
+    for (auto& e : m_starts) xs.push_back(e.x);
+    return sectionEnd(levelData(m_level), this->selStart(), xs, m_length);
+}
+
 void MapPopup::drawOverlay() {
     m_overlay->clear();
+    {
+        float x0 = this->selStart(), x1 = this->selEnd();
+        float top = std::max(m_parsed->maxY + 150.f, 450.f);
+        m_overlay->drawRect(toMap(x0, 0), toMap(x1, top), {0.3f, 1, 0.3f, 0.07f}, 0.f, {0, 0, 0, 0});
+        auto e0 = toMap(x1, LEVEL_Y_OFFSET), e1 = toMap(x1, LEVEL_Y_OFFSET + 300);
+        m_overlay->drawSegment(e0, e1, 1.f, {1, 0.35f, 0.35f, 0.9f});
+        for (int i = 0; i < 4; i++) {  // a small chequered flag
+            for (int j = 0; j < 2; j++) {
+                bool white = (i + j) % 2 == 0;
+                CCPoint a = {e1.x + i * 3.f, e1.y - (j + 1) * 3.f};
+                CCPoint b = {a.x + 3.f, a.y + 3.f};
+                ccColor4F c = white ? ccColor4F{1, 1, 1, 1} : ccColor4F{0.1f, 0.1f, 0.1f, 1};
+                m_overlay->drawRect(a, b, c, 0.f, c);
+            }
+        }
+        m_endLabel->setPosition({e1.x + 6, e1.y + 7});
+    }
     CCPoint p = m_sel == 0 ? toMap(0, LEVEL_Y_OFFSET + 15) : toMap(m_starts[m_sel - 1].x, m_starts[m_sel - 1].y);
     if (!m_point) {
         m_overlay->drawCircle({p.x + 3, p.y + 8}, 11.f, {0.3f, 1, 0.3f, 0.12f}, 1.2f, {0.3f, 1, 0.3f, 1}, 32);
@@ -267,19 +318,23 @@ void MapPopup::drawOverlay() {
 void MapPopup::updateInfo() {
     std::string text;
     bool custom = false;
-    if (m_point) {
+    if (m_settingEnd) {
+        text = "Tap the map where this part should end (tap before its flag to go back to the next StartPos)";
+    }
+    else if (m_point) {
         auto st = sampleState(*m_point);
         text = m_pointJump > 0 ? fmt::format("Jump {} at {}%: {}", m_pointJump, pct(m_point->x), describe(st))
                                : fmt::format("Your run at {}%: {}", pct(m_point->x), describe(st));
     }
     else if (m_sel == 0) {
-        text = fmt::format("From the start: {}", describe(m_parsed->startState));
+        text = fmt::format("From the start: {}   Goal {}%", describe(m_parsed->startState), pct(this->selEnd()));
     }
     else {
         auto& e = m_starts[m_sel - 1];
         custom = e.custom;
-        text = fmt::format("StartPos {} at {}%: {}{}", m_sel, pct(e.x), describe(e.state),
-                           e.custom ? " (yours)" : e.fixed ? " (fixed)" : e.status == 1 ? " (checked)" : "");
+        text = fmt::format("StartPos {} at {}%: {}{}   Goal {}%", m_sel, pct(e.x), describe(e.state),
+                           e.custom ? " (yours)" : e.fixed ? " (fixed)" : e.status == 1 ? " (checked)" : "",
+                           pct(this->selEnd()));
     }
     m_info->setString(text.c_str());
     m_info->limitLabelWidth(400.f, 0.36f, 0.1f);
@@ -322,6 +377,19 @@ void MapPopup::selectStart(int sel) {
 
 void MapPopup::handleTap(CCPoint mapPoint) {
     CCPoint c = mapPoint - m_canvas->getPosition();
+    if (m_settingEnd) {
+        float x = c.x / m_zoom;
+        auto& data = levelData(m_level);
+        int key = sectionKey(this->selStart());
+        if (x > this->selStart() + 30) data.ends[key] = std::min(x, m_length);
+        else data.ends.erase(key);
+        data.save();
+        m_settingEnd = false;
+        this->setText(m_endBtn, "Set end");
+        this->drawOverlay();
+        this->updateInfo();
+        return;
+    }
     // a flag?
     int hit = -1;
     float best = 12.f;
@@ -492,6 +560,7 @@ void MapPopup::onToggleDeaths() {
     m_showDeaths = !m_showDeaths;
     setDeathsVisible(m_showDeaths);
     studioDeathsChanged();
+    this->updateStats();
     // change only the text, so the button stays where it is
     if (auto spr = typeinfo_cast<ButtonSprite*>(m_deathsBtn->getNormalImage())) {
         spr->setString(m_showDeaths ? "Deaths: on" : "Deaths: off");
@@ -507,10 +576,102 @@ void MapPopup::onToggleDeaths() {
     }
 }
 
+void MapPopup::setText(CCMenuItemSpriteExtra* item, char const* text) {
+    if (auto spr = typeinfo_cast<ButtonSprite*>(item->getNormalImage())) {
+        spr->setString(text);
+        item->setContentSize(spr->getScaledContentSize());
+        spr->setPosition(item->getContentSize() / 2);
+    }
+}
+
+void MapPopup::onSetEnd() {
+    m_settingEnd = !m_settingEnd;
+    m_point.reset();
+    this->setText(m_endBtn, m_settingEnd ? "Cancel" : "Set end");
+    this->drawOverlay();
+    this->updateInfo();
+}
+
+void MapPopup::onWatch() {
+    if (m_watching) return this->stopWatch();
+    if (m_line.path.size() < 2) {
+        Notification::create("Play the level first: then you can watch your best try", NotificationIcon::Info)->show();
+        return;
+    }
+    // one clock for the whole line (it can be made of several tries)
+    m_watchTimes.clear();
+    float offset = 0, last = 0;
+    for (auto& smp : m_line.path) {
+        if (smp.flags & 0x80) offset = (m_watchTimes.empty() ? 0.f : last + 0.4f) - smp.t;
+        last = smp.t + offset;
+        m_watchTimes.push_back(last);
+    }
+    auto gm = GameManager::get();
+    m_watchIcon = SimplePlayer::create(gm->getPlayerFrame());
+    m_watchIcon->setColor(gm->colorForIdx(gm->getPlayerColor()));
+    m_watchIcon->setSecondColor(gm->colorForIdx(gm->getPlayerColor2()));
+    m_canvas->addChild(m_watchIcon, 8);
+    m_watchMode = -1;
+    m_watchT = 0;
+    m_watchIdx = 0;
+    m_watching = true;
+    m_point.reset();
+    m_settingEnd = false;
+    this->setText(m_endBtn, "Set end");
+    this->setText(m_watchBtn, "Stop");
+    this->schedule(schedule_selector(MapPopup::onTick));
+    this->onTick(0);
+}
+
+void MapPopup::stopWatch() {
+    m_watching = false;
+    this->unschedule(schedule_selector(MapPopup::onTick));
+    if (m_watchIcon) m_watchIcon->removeFromParent();
+    m_watchIcon = nullptr;
+    this->setText(m_watchBtn, "Watch");
+    this->updateInfo();
+}
+
+void MapPopup::onTick(float dt) {
+    if (!m_watching || !m_watchIcon) return;
+    m_watchT += dt;
+    auto& path = m_line.path;
+    while (m_watchIdx + 1 < path.size() && m_watchTimes[m_watchIdx + 1] <= m_watchT) m_watchIdx++;
+    if (m_watchIdx + 1 >= path.size()) {
+        this->stopWatch();
+        m_info->setString(m_line.completed ? "Your best try: level complete!" : fmt::format("Your best try ends at {}%", pct(m_line.to)).c_str());
+        m_info->limitLabelWidth(400.f, 0.36f, 0.1f);
+        return;
+    }
+    auto& a = path[m_watchIdx];
+    auto& b = path[m_watchIdx + 1];
+    float span = m_watchTimes[m_watchIdx + 1] - m_watchTimes[m_watchIdx];
+    float k = (b.flags & 0x80) || span <= 0.0001f ? 0.f : std::clamp((m_watchT - m_watchTimes[m_watchIdx]) / span, 0.f, 1.f);
+    float x = a.x + (b.x - a.x) * k, y = a.y + (b.y - a.y) * k;
+    m_watchIcon->setPosition(toMap(x, y));
+    m_watchIcon->setRotation(a.rot);
+    if (a.mode != m_watchMode) {
+        m_watchMode = a.mode;
+        auto type = modeIcon(a.mode);
+        m_watchIcon->updatePlayerFrame(GameManager::get()->activeIconForType(type), type);
+    }
+    float scale = std::clamp(m_zoom * 2.4f, 0.2f, 0.8f) * ((a.flags & 2) ? 0.6f : 1.f);
+    m_watchIcon->setScaleX(scale);
+    m_watchIcon->setScaleY((a.flags & 1) ? -scale : scale);
+    // the camera follows you
+    auto pos = m_canvas->getPosition();
+    CCPoint want = {m_mapSize.width * 0.4f - x * m_zoom, m_mapSize.height * 0.45f - y * m_zoom};
+    m_canvas->setPosition({want.x, pos.y + (want.y - pos.y) * std::min(1.f, dt * 4.f)});
+    this->clampCanvas();
+    m_info->setString(fmt::format("Watching your best try: {}%   {}", pct(x), describe(sampleState(a))).c_str());
+    m_info->limitLabelWidth(400.f, 0.36f, 0.1f);
+}
+
 bool MapPopup::ccTouchBegan(CCTouch* touch, CCEvent* event) {
     auto p = m_mainLayer->convertToNodeSpace(touch->getLocation());
     CCRect r = {m_mapOrigin.x, m_mapOrigin.y, m_mapSize.width, m_mapSize.height};
     if (r.containsPoint(p)) {
+        if (m_watching) this->stopWatch();
         m_dragging = true;
         m_moved = false;
         m_touchStart = p;

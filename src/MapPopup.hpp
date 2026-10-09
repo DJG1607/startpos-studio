@@ -37,6 +37,18 @@ protected:
     CCMenuItemSpriteExtra* m_placeBtn = nullptr;
     CCMenuItemSpriteExtra* m_deleteBtn = nullptr;
     CCMenuItemSpriteExtra* m_deathsBtn = nullptr;
+    CCMenuItemSpriteExtra* m_endBtn = nullptr;
+    CCMenuItemSpriteExtra* m_watchBtn = nullptr;
+    CCLabelBMFont* m_endLabel = nullptr;
+    bool m_settingEnd = false;
+
+    // Watch: your best try played on the map
+    bool m_watching = false;
+    float m_watchT = 0;
+    size_t m_watchIdx = 0;
+    std::vector<float> m_watchTimes;
+    SimplePlayer* m_watchIcon = nullptr;
+    int m_watchMode = -1;
 
     bool m_dragging = false;
     bool m_moved = false;
@@ -61,6 +73,13 @@ protected:
     void onPaste();
     void onZoom(float factor);
     void onToggleDeaths();
+    void onSetEnd();
+    void onWatch();
+    void stopWatch();
+    void onTick(float dt);
+    float selStart() const;
+    float selEnd() const;
+    void setText(CCMenuItemSpriteExtra* item, char const* text);
 
     int pct(float x) const;
     CCPoint toMap(float x, float y) const { return {x * m_zoom, y * m_zoom}; }

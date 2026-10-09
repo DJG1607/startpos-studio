@@ -57,9 +57,16 @@ struct LevelData {
     std::vector<SavedStart> custom;
     std::unordered_map<int, SPState> fixes;  // key: rounded x of a level StartPos
     std::unordered_map<int, int> status;     // key: rounded x, 1 right, 2 fixed
+    // sections: every StartPos (and the start of the level, key -1) goes up to an end
+    std::unordered_map<int, float> ends;     // end chosen by you (else: the next StartPos)
+    std::unordered_map<int, int> done;       // times you completed that section
 
     void save();
 };
+
+int sectionKey(float startX);  // -1 for the start of the level
+// where the section that begins at startX ends: your end, else the next StartPos, else the level end
+float sectionEnd(LevelData const& data, float startX, std::vector<float> const& startXs, float length);
 
 // One sample of your run.
 struct Sample {

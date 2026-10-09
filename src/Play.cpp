@@ -2,6 +2,7 @@
 #include <Geode/modify/PlayLayer.hpp>
 #include <Geode/modify/GJBaseGameLayer.hpp>
 #include <Geode/loader/SettingV3.hpp>
+#include <deque>
 
 void setCascade(CCNode* node) {
     if (!node) return;
@@ -51,20 +52,25 @@ class $modify(StudioPlayLayer, PlayLayer) {
         float sampleTimer = 0;
         int unsaved = 0;
 
-        // ghost and death marks
-        Ref<SimplePlayer> ghost;
-        std::vector<Sample> ghostPath;
-        size_t ghostIdx = 0;
-        int ghostMode = -1;
         Ref<CCDrawNode> deathNode;
 
-        // switcher
-        Ref<CCNodeRGBA> ui;
-        Ref<CCLabelBMFont> title;
-        Ref<CCLabelBMFont> detail;
-        Ref<CCNode> bar;
-        Ref<SimplePlayer> icon;
-        Ref<CCNode> marks;
+        // HUD (top left): percent and goal, clicks per second, clicks this attempt
+        Ref<CCNode> hud;
+        Ref<CCLabelBMFont> hudPercent;
+        Ref<CCLabelBMFont> hudCps;
+        Ref<CCLabelBMFont> hudClicks;
+        Ref<CCLabelBMFont> hudSection;
+        Ref<CCLabelBMFont> hudInfo;
+        float clock = 0;
+        float hudTimer = 1.f;
+        std::deque<float> clickTimes;
+        int attemptClicks = 0;
+
+        // section: from the StartPos you start on up to its end
+        float sectionStart = 0;
+        float sectionEndX = 0;
+        bool sectionCounts = false;
+        bool sectionReached = false;
         bool hinted = false;
     };
 
@@ -72,7 +78,7 @@ class $modify(StudioPlayLayer, PlayLayer) {
 
     bool init(GJGameLevel* level, bool useReplay, bool dontCreateObjects) {
         if (!PlayLayer::init(level, useReplay, dontCreateObjects)) return false;
-        this->buildSwitcher();
+        this->buildHud();
         this->refreshUI(true);
         return true;
     }
@@ -288,16 +294,69 @@ class $modify(StudioPlayLayer, PlayLayer) {
         f->sampleTimer = 1.f;
         for (auto& s : f->starts) s.checked = s.obj->getPositionX() <= f->current.startX + 2.f;
 
-        // ghost: your best run from this same place
-        f->ghostPath.clear();
-        f->ghostIdx = 0;
-        if (setting("show-ghost")) {
-            if (auto best = runData(m_level).bestFor(f->current.startX); best && best->reach() > 60) {
-                f->ghostPath = best->path;
-            }
-        }
+        f->attemptClicks = 0;
         this->ensureWorldNodes();
-        if (f->ghost) f->ghost->setVisible(false);
+        this->setupSection();
+    }
+
+    void setupSection() {
+        auto f = m_fields.self();
+        auto& data = levelData(m_level);
+        float sx = m_startPosObject ? m_startPosObject->getPositionX() : 0.f;
+        std::vector<float> xs;
+        for (auto& s : f->starts) xs.push_back(s.obj->getPositionX());
+        float len = m_levelLength > 0 ? m_levelLength : 1e9f;
+        f->sectionStart = sx;
+        f->sectionEndX = sectionEnd(data, sx, xs, len);
+        f->sectionCounts = std::abs(f->current.startX - sx) < 20.f;
+        f->sectionReached = false;
+        f->hudTimer = 1.f;
+    }
+
+    // you got to the end of your section: it counts as done, and you keep playing
+    void completeSection(bool show) {
+        auto f = m_fields.self();
+        if (f->sectionReached) return;
+        f->sectionReached = true;
+        auto& data = levelData(m_level);
+        int n = ++data.done[sectionKey(f->sectionStart)];
+        data.save();
+        f->hudTimer = 1.f;
+        if (!show || !m_uiLayer) return;
+        auto win = CCDirector::get()->getWinSize();
+        auto label = CCLabelBMFont::create("SECTION COMPLETE!", "goldFont.fnt");
+        label->setPosition({win.width / 2, win.height / 2 + 40.f});
+        label->setScale(0.1f);
+        m_uiLayer->addChild(label, 100);
+        label->runAction(CCSequence::create(
+            CCEaseBackOut::create(CCScaleTo::create(0.35f, 1.1f)),
+            CCDelayTime::create(0.9f),
+            CCFadeOut::create(0.5f),
+            CCRemoveSelf::create(),
+            nullptr
+        ));
+        auto sub = CCLabelBMFont::create(fmt::format("Done {} {}  -  keep going!", n, n == 1 ? "time" : "times").c_str(), "bigFont.fnt");
+        sub->setPosition({win.width / 2, win.height / 2 + 12.f});
+        sub->setScale(0.4f);
+        sub->setOpacity(0);
+        m_uiLayer->addChild(sub, 100);
+        sub->runAction(CCSequence::create(
+            CCDelayTime::create(0.2f),
+            CCFadeIn::create(0.2f),
+            CCDelayTime::create(1.0f),
+            CCFadeOut::create(0.5f),
+            CCRemoveSelf::create(),
+            nullptr
+        ));
+        FMODAudioEngine::sharedEngine()->playEffect("achievement_01.ogg");
+    }
+
+    void checkSection() {
+        auto f = m_fields.self();
+        if (!f->sectionCounts || f->sectionReached) return;
+        if (m_player1->getPositionX() < f->sectionEndX) return;
+        if (m_levelLength > 0 && f->sectionEndX >= m_levelLength - 5) return;  // the real end: GD shows its own
+        this->completeSection(true);
     }
 
     void finishAttempt(bool died, bool completed) {
@@ -343,6 +402,8 @@ class $modify(StudioPlayLayer, PlayLayer) {
         if (f->current.clicks.size() < 20000) {
             f->current.clicks.push_back(m_player1->getPosition());
         }
+        f->attemptClicks++;
+        f->clickTimes.push_back(f->clock);
     }
 
     void destroyPlayer(PlayerObject* player, GameObject* object) {
@@ -352,6 +413,7 @@ class $modify(StudioPlayLayer, PlayLayer) {
     }
 
     void levelComplete() {
+        if (m_fields->sectionCounts) this->completeSection(false);
         this->finishAttempt(false, true);
         PlayLayer::levelComplete();
     }
@@ -391,6 +453,8 @@ class $modify(StudioPlayLayer, PlayLayer) {
         if (!m_player1) return;
         if (f->recording && f->attemptTime > 0.1f && this->playerIsDead()) this->finishAttempt(true, false);
         if (m_isPaused) return;
+        f->clock += dt;
+        this->updateHud(dt);
         if (!f->recording) {
             if (this->playerIsDead() || m_hasCompletedLevel) return;
             this->beginAttempt();
@@ -402,7 +466,7 @@ class $modify(StudioPlayLayer, PlayLayer) {
             this->pushSample();
         }
         this->checkStarts();
-        this->updateGhost();
+        this->checkSection();
     }
 
     // auto-fix: compare every StartPos you fly through with your real state there
@@ -457,16 +521,6 @@ class $modify(StudioPlayLayer, PlayLayer) {
             for (size_t i = from; i < pts.size(); i++) this->drawDeath(pts[i]);
             f->deathNode->setVisible(deathsVisible());
         }
-        if (!f->ghost) {
-            auto gm = GameManager::get();
-            f->ghost = SimplePlayer::create(gm->getPlayerFrame());
-            f->ghost->setID("ghost"_spr);
-            f->ghost->setColor(gm->colorForIdx(gm->getPlayerColor()));
-            f->ghost->setSecondColor(gm->colorForIdx(gm->getPlayerColor2()));
-            f->ghost->setVisible(false);
-            parent->addChild(f->ghost, m_player1->getZOrder() - 1);
-            f->ghostMode = -1;
-        }
     }
 
     void drawDeath(CCPoint p) {
@@ -478,160 +532,84 @@ class $modify(StudioPlayLayer, PlayLayer) {
         f->deathNode->drawSegment({p.x - r, p.y + r}, {p.x + r, p.y - r}, 1.4f, red);
     }
 
-    void updateGhost() {
-        auto f = m_fields.self();
-        if (!f->ghost) return;
-        auto& path = f->ghostPath;
-        if (path.size() < 2 || f->attemptTime > path.back().t) {
-            f->ghost->setVisible(false);
-            return;
-        }
-        while (f->ghostIdx + 1 < path.size() && path[f->ghostIdx + 1].t <= f->attemptTime) f->ghostIdx++;
-        auto& a = path[f->ghostIdx];
-        auto& b = path[std::min(f->ghostIdx + 1, path.size() - 1)];
-        float span = b.t - a.t;
-        float k = span > 0.0001f ? std::clamp((f->attemptTime - a.t) / span, 0.f, 1.f) : 0.f;
-        f->ghost->setPosition({a.x + (b.x - a.x) * k, a.y + (b.y - a.y) * k});
-        f->ghost->setRotation(a.rot);
-        if (a.mode != f->ghostMode) {
-            f->ghostMode = a.mode;
-            auto type = modeIcon(a.mode);
-            f->ghost->updatePlayerFrame(GameManager::get()->activeIconForType(type), type);
-            setCascade(f->ghost);
-            f->ghost->setOpacity(110);
-        }
-        float scale = (a.flags & 2) ? 0.6f : 1.f;
-        f->ghost->setScaleX(scale);
-        f->ghost->setScaleY((a.flags & 1) ? -scale : scale);
-        f->ghost->setVisible(true);
-    }
+    // ------------------------------------------------------------ HUD
 
-    // ------------------------------------------------------------ switcher
-
-    void buildSwitcher() {
+    void buildHud() {
         auto f = m_fields.self();
-        if (f->ui || !m_uiLayer) return;
+        if (f->hud || !m_uiLayer || !setting("show-hud")) return;
         auto win = CCDirector::get()->getWinSize();
-
-        auto root = CCNodeRGBA::create();
-        root->setID("switcher"_spr);
-        root->setPosition({win.width / 2, CCDirector::get()->getScreenBottom() + 26.f});
-        m_uiLayer->addChild(root, 50);
-        f->ui = root;
-
-        auto bg = CCScale9Sprite::create("square02_small.png");
-        bg->setContentSize({240.f, 44.f});
-        bg->setColor({0, 0, 0});
-        bg->setOpacity(150);
-        root->addChild(bg);
-
-        auto menu = CCMenu::create();
-        menu->setPosition({0, 0});
-        root->addChild(menu);
-        auto prevSpr = CCSprite::createWithSpriteFrameName("GJ_arrow_02_001.png");
-        prevSpr->setScale(0.5f);
-        auto nextSpr = CCSprite::createWithSpriteFrameName("GJ_arrow_02_001.png");
-        nextSpr->setScale(0.5f);
-        nextSpr->setFlipX(true);
-        auto prev = CCMenuItemExt::createSpriteExtra(prevSpr, [this](auto) { this->switchTo(m_fields->index - 1); });
-        auto next = CCMenuItemExt::createSpriteExtra(nextSpr, [this](auto) { this->switchTo(m_fields->index + 1); });
-        prev->setPosition({-104.f, 0});
-        next->setPosition({104.f, 0});
-        menu->addChild(prev);
-        menu->addChild(next);
-
-        auto gm = GameManager::get();
-        auto icon = SimplePlayer::create(gm->getPlayerFrame());
-        icon->setColor(gm->colorForIdx(gm->getPlayerColor()));
-        icon->setSecondColor(gm->colorForIdx(gm->getPlayerColor2()));
-        icon->setScale(0.42f);
-        icon->setPosition({-74.f, 2.f});
-        root->addChild(icon);
-        f->icon = icon;
-
-        auto title = CCLabelBMFont::create("Start", "bigFont.fnt");
-        title->setPosition({8.f, 11.f});
-        root->addChild(title);
-        f->title = title;
-
-        auto detail = CCLabelBMFont::create("", "bigFont.fnt");
-        detail->setPosition({8.f, -2.f});
-        root->addChild(detail);
-        f->detail = detail;
-
-        auto bar = CCLayerColor::create({255, 255, 255, 70}, 140.f, 2.f);
-        bar->ignoreAnchorPointForPosition(false);
-        bar->setPosition({8.f, -14.f});
-        root->addChild(bar);
-        f->bar = bar;
-
-        auto marks = CCNode::create();
-        marks->setPosition({8.f - 70.f, -14.f});
-        root->addChild(marks);
-        f->marks = marks;
+        auto hud = CCNode::create();
+        hud->setID("hud"_spr);
+        hud->setPosition({6.f, win.height - 6.f});
+        m_uiLayer->addChild(hud, 60);
+        f->hud = hud;
+        auto line = [&](float y, float scale) {
+            auto l = CCLabelBMFont::create("", "bigFont.fnt");
+            l->setAnchorPoint({0.f, 1.f});
+            l->setScale(scale);
+            l->setPosition({0.f, y});
+            hud->addChild(l);
+            return l;
+        };
+        f->hudPercent = line(0.f, 0.45f);
+        f->hudCps = line(-18.f, 0.32f);
+        f->hudClicks = line(-31.f, 0.32f);
+        f->hudSection = line(-44.f, 0.3f);
+        f->hudInfo = line(-58.f, 0.3f);
+        f->hudInfo->setOpacity(0);
     }
 
+    void updateHud(float dt) {
+        auto f = m_fields.self();
+        if (!f->hud) return;
+        while (!f->clickTimes.empty() && f->clickTimes.front() < f->clock - 1.f) f->clickTimes.pop_front();
+        f->hudTimer += dt;
+        if (f->hudTimer < 0.1f) return;
+        f->hudTimer = 0;
+        int now = m_player1 ? this->percentOf(m_player1->getPositionX()) : 0;
+        int goal = (m_levelLength > 0 && f->sectionEndX < m_levelLength - 5) ? this->percentOf(f->sectionEndX) : 100;
+        f->hudPercent->setString(fmt::format("{}%  >  {}%", now, goal).c_str());
+        f->hudPercent->setColor(f->sectionReached ? ccColor3B{90, 255, 90} : ccColor3B{255, 255, 255});
+        f->hudCps->setString(fmt::format("CPS {}", f->clickTimes.size()).c_str());
+        f->hudClicks->setString(fmt::format("Clicks {}", f->attemptClicks).c_str());
+        auto& data = levelData(m_level);
+        int done = 0;
+        if (auto it = data.done.find(sectionKey(f->sectionStart)); it != data.done.end()) done = it->second;
+        if (done > 0) {
+            f->hudSection->setString(fmt::format("Section done x{}", done).c_str());
+            f->hudSection->setColor({90, 255, 90});
+        }
+        else {
+            f->hudSection->setString(fmt::format("Goal: reach {}%", goal).c_str());
+            f->hudSection->setColor({255, 220, 120});
+        }
+    }
+
+    // shows which StartPos you are on for a moment (after switching or placing one)
     void refreshUI(bool flash) {
         auto f = m_fields.self();
         this->updateProgressMarks();
-        if (!f->ui) return;
+        if (!flash || !f->hudInfo) return;
         int n = static_cast<int>(f->starts.size());
-        f->ui->setVisible(n > 0 && setting("show-switcher"));
         if (n == 0) return;
         int idx = std::clamp(f->index, 0, n);
-
         SPState state;
-        std::string where;
-        std::string mark;
+        std::string text;
         if (idx == 0) {
             if (m_levelSettings) state = stateOf(m_levelSettings);
-            where = "Start of the level";
+            text = fmt::format("Start of the level (0/{})", n);
         }
         else {
             auto& s = f->starts[idx - 1];
             state = stateOf(s.obj->m_startSettings);
-            where = fmt::format("{}%", this->percentOf(s.obj->getPositionX()));
-            if (s.custom) mark = "  (yours)";
-            else if (s.status == 1) mark = "  (checked)";
-            else if (s.status == 2) mark = "  (fixed)";
-            else if (s.status == 3) mark = "  (wrong!)";
+            text = fmt::format("StartPos {}/{}  {}%  {}{}", idx, n, this->percentOf(s.obj->getPositionX()), describe(state),
+                               s.custom ? " (yours)" : "");
         }
-        f->title->setString(idx == 0 ? fmt::format("Start  0/{}", n).c_str()
-                                     : fmt::format("StartPos {}/{}{}", idx, n, mark).c_str());
-        f->title->limitLabelWidth(150.f, 0.4f, 0.1f);
-        f->detail->setString(fmt::format("{}  {}", where, describe(state)).c_str());
-        f->detail->limitLabelWidth(150.f, 0.3f, 0.1f);
-        f->detail->setColor(modeColor(state.mode));
-        auto type = modeIcon(state.mode);
-        f->icon->updatePlayerFrame(GameManager::get()->activeIconForType(type), type);
-
-        f->marks->removeAllChildren();
-        float len = m_levelLength > 0 ? m_levelLength : 1.f;
-        for (int i = 0; i <= n; i++) {
-            float x = i == 0 ? 0.f : f->starts[i - 1].obj->getPositionX();
-            bool sel = i == idx;
-            ccColor4B col = sel ? ccColor4B{90, 255, 90, 255}
-                          : (i > 0 && f->starts[i - 1].custom) ? ccColor4B{60, 230, 255, 220}
-                          : (i > 0 && f->starts[i - 1].status == 3) ? ccColor4B{255, 70, 70, 220}
-                          : ccColor4B{255, 255, 255, 180};
-            float w = sel ? 3.f : 2.f, h = sel ? 9.f : 6.f;
-            auto m = CCLayerColor::create(col, w, h);
-            m->setPosition({std::clamp(x / len, 0.f, 1.f) * 140.f - w / 2, -h / 2 + 1});
-            f->marks->addChild(m);
-        }
-
-        setCascade(f->ui);
-        float idle = static_cast<float>(Mod::get()->getSettingValue<int64_t>("switcher-opacity")) * 2.55f;
-        f->ui->stopAllActions();
-        if (flash) {
-            f->ui->setOpacity(255);
-            f->ui->runAction(CCSequence::create(
-                CCDelayTime::create(1.8f), CCEaseInOut::create(CCFadeTo::create(0.6f, static_cast<GLubyte>(idle)), 2.f), nullptr
-            ));
-        }
-        else if (f->ui->getOpacity() < idle) {
-            f->ui->setOpacity(static_cast<GLubyte>(idle));
-        }
+        f->hudInfo->setString(text.c_str());
+        f->hudInfo->setColor(modeColor(state.mode));
+        f->hudInfo->stopAllActions();
+        f->hudInfo->setOpacity(255);
+        f->hudInfo->runAction(CCSequence::create(CCDelayTime::create(2.f), CCFadeOut::create(0.5f), nullptr));
     }
 
     void updateProgressMarks() {

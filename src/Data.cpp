@@ -176,6 +176,12 @@ LevelData& levelData(GJGameLevel* level) {
             d.status[static_cast<int>(num(e, 0))] = static_cast<int>(num(e, 1));
         }
     }
+    if (auto arr = json.get("ends"); arr.isOk() && arr.unwrap().isArray()) {
+        for (auto& e : arr.unwrap()) d.ends[static_cast<int>(num(e, 0))] = static_cast<float>(num(e, 1));
+    }
+    if (auto arr = json.get("done"); arr.isOk() && arr.unwrap().isArray()) {
+        for (auto& e : arr.unwrap()) d.done[static_cast<int>(num(e, 0))] = static_cast<int>(num(e, 1));
+    }
     return d;
 }
 
@@ -206,7 +212,33 @@ void LevelData::save() {
         }));
     }
     json.set("status", matjson::Value(st));
+    std::vector<matjson::Value> en, dn;
+    for (auto& [k, x] : ends) {
+        en.push_back(matjson::Value(std::vector<matjson::Value>{
+            matjson::Value(static_cast<double>(k)), matjson::Value(static_cast<double>(x))
+        }));
+    }
+    for (auto& [k, n] : done) {
+        dn.push_back(matjson::Value(std::vector<matjson::Value>{
+            matjson::Value(static_cast<double>(k)), matjson::Value(static_cast<double>(n))
+        }));
+    }
+    json.set("ends", matjson::Value(en));
+    json.set("done", matjson::Value(dn));
     Mod::get()->setSavedValue<matjson::Value>("lvl/" + key, json);
+}
+
+int sectionKey(float startX) {
+    return startX < 1.f ? -1 : static_cast<int>(std::round(startX));
+}
+
+float sectionEnd(LevelData const& data, float startX, std::vector<float> const& startXs, float length) {
+    if (auto it = data.ends.find(sectionKey(startX)); it != data.ends.end() && it->second > startX + 30) {
+        return std::min(it->second, length);
+    }
+    float next = length;
+    for (float x : startXs) if (x > startX + 30 && x < next) next = x;
+    return next;
 }
 
 // ---------------------------------------------------------------- run data

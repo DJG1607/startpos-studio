@@ -5,9 +5,9 @@
 	},
 	"id": "traxcerd.startpos-studio",
 	"name": "StartPos Studio",
-	"version": "v1.1.2",
+	"version": "v1.2.0",
 	"developer": "Traxcerd",
-	"description": "Pick your StartPos before playing, switch it in-game and place new ones with one key",
+	"description": "Pick your StartPos on a map, practise parts with a start and an end, place StartPos with one key",
 	"tags": [
 		"gameplay",
 		"interface",
@@ -78,34 +78,16 @@
 			"type": "title",
 			"name": "Look"
 		},
-		"show-switcher": {
+		"show-hud": {
 			"type": "bool",
-			"name": "Show the switcher",
-			"description": "Shows the StartPos bar at the bottom of the screen while playing.",
+			"name": "Info at the top left",
+			"description": "Shows your % and the goal of your part, clicks per second and clicks this try (it goes back to 0 when you die).",
 			"default": true
-		},
-		"switcher-opacity": {
-			"type": "int",
-			"name": "Switcher opacity when idle",
-			"description": "How visible the bar stays after it fades (0 = hidden until you switch).",
-			"default": 45,
-			"min": 0,
-			"max": 100,
-			"control": {
-				"slider": true,
-				"slider-step": 5
-			}
 		},
 		"progress-markers": {
 			"type": "bool",
 			"name": "Marks on the progress bar",
 			"description": "Draws a small mark on the top progress bar for every StartPos.",
-			"default": true
-		},
-		"show-ghost": {
-			"type": "bool",
-			"name": "Ghost of your best run",
-			"description": "A see-through copy of your icon plays your best run from the same StartPos, so you can race it.",
 			"default": true
 		}
 	}
