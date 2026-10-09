@@ -1,8 +1,9 @@
 #pragma once
 #include "Common.hpp"
 
-// The level map: StartPos flags, your runs (with every jump), your deaths.
+// The level map: StartPos flags and your best try as one line (with every jump).
 // Tap a flag to pick where you start, tap your line to put a new StartPos there.
+// Deaths are only drawn when you turn them on.
 class MapPopup : public geode::Popup {
 public:
     enum class From { Info, Editor, Pause };
@@ -18,9 +19,9 @@ protected:
     int m_sel = 0;  // 0 = beginning, i = m_starts[i - 1]
     std::optional<Sample> m_point;
     int m_pointJump = -1;
-    std::vector<Attempt const*> m_runs;
-    int m_runIdx = 0;
-    float m_zoom = 0.12f;
+    BestLine m_line;
+    bool m_showDeaths = false;
+    float m_zoom = 0.15f;
     float m_length = 1.f;
 
     CCSize m_mapSize = {400.f, 150.f};
@@ -35,6 +36,7 @@ protected:
     CCMenuItemSpriteExtra* m_playBtn = nullptr;
     CCMenuItemSpriteExtra* m_placeBtn = nullptr;
     CCMenuItemSpriteExtra* m_deleteBtn = nullptr;
+    CCMenuItemSpriteExtra* m_deathsBtn = nullptr;
 
     bool m_dragging = false;
     bool m_moved = false;
@@ -43,7 +45,6 @@ protected:
 
     bool init(GJGameLevel* level, From from, CCNode* owner);
     void reload();
-    void collectRuns();
     void redraw();
     void drawOverlay();
     void updateInfo();
@@ -59,7 +60,7 @@ protected:
     void onCopy();
     void onPaste();
     void onZoom(float factor);
-    void onRun(int dir);
+    void onToggleDeaths();
 
     int pct(float x) const;
     CCPoint toMap(float x, float y) const { return {x * m_zoom, y * m_zoom}; }

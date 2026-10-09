@@ -333,6 +333,56 @@ Attempt const* RunData::bestFor(float startX) const {
     return best;
 }
 
+BestLine bestLine(RunData const& runs) {
+    BestLine out;
+    std::vector<Attempt const*> all;
+    for (auto& a : runs.bests) if (a.path.size() >= 2) all.push_back(&a);
+    for (auto& a : runs.recent) if (a.path.size() >= 2) all.push_back(&a);
+    if (all.empty()) return out;
+    auto end = [](Attempt const* a) { return a->completed ? 1e9f : a->endX; };
+
+    float reached = -1e9f;
+    bool first = true;
+    while (true) {
+        Attempt const* pick = nullptr;
+        // attempts that start where the line is now and go further
+        for (auto a : all) {
+            if (!first && a->startX > reached + 15) continue;
+            if (end(a) <= reached + 30) continue;
+            if (first && a->startX > 60) continue;
+            if (!pick || end(a) > end(pick)) pick = a;
+        }
+        bool gap = false;
+        if (!pick) {
+            // nothing continues the line: jump to the next place you started from
+            float next = 1e9f;
+            for (auto a : all) if (a->startX > reached && end(a) > reached + 30) next = std::min(next, a->startX);
+            if (next >= 1e9f) break;
+            for (auto a : all) {
+                if (std::abs(a->startX - next) > 15) continue;
+                if (!pick || end(a) > end(pick)) pick = a;
+            }
+            if (!pick) break;
+            gap = !first;
+        }
+        bool newPiece = gap || first;
+        for (auto& smp : pick->path) {
+            if (smp.x <= reached) continue;
+            Sample s = smp;
+            s.flags &= 0x7f;
+            if (newPiece) { s.flags |= 0x80; newPiece = false; }
+            out.path.push_back(s);
+        }
+        for (auto& c : pick->clicks) if (c.x > reached && c.x <= pick->endX + 1) out.clicks.push_back(c);
+        if (first) out.from = pick->startX;
+        first = false;
+        reached = pick->endX;
+        out.to = pick->endX;
+        if (pick->completed) { out.completed = true; break; }
+    }
+    return out;
+}
+
 // ---------------------------------------------------------------- level parsing
 
 static std::optional<std::string> gunzip(std::string const& raw) {

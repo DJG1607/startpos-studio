@@ -71,12 +71,18 @@ bool MapPopup::init(GJGameLevel* level, From from, CCNode* owner) {
     m_mainLayer->addChild(frame, 2);
 
     m_stats = CCLabelBMFont::create("", "goldFont.fnt");
-    m_stats->setPosition({220.f, 256.f});
+    m_stats->setPosition({220.f, 263.f});
     m_mainLayer->addChild(m_stats);
 
-    auto hint = CCLabelBMFont::create("Drag to move   Tap a flag to choose   Tap your line to place", "chatFont.fnt");
-    hint->setScale(0.5f);
-    hint->setOpacity(170);
+    // legend: what every thing on the map is
+    auto legend = CCLabelBMFont::create(
+        "Line = your best try (colour = gamemode)   White dots = your jumps   Flags = StartPos", "chatFont.fnt");
+    legend->setScale(0.48f);
+    legend->setPosition({220.f, 249.f});
+    m_mainLayer->addChild(legend);
+    auto hint = CCLabelBMFont::create("Drag to move.  Tap a flag to start there.  Tap your line or a jump to put a StartPos there.", "chatFont.fnt");
+    hint->setScale(0.48f);
+    hint->setColor({255, 230, 120});
     hint->setPosition({220.f, 86.f});
     m_mainLayer->addChild(hint);
 
@@ -95,17 +101,18 @@ bool MapPopup::init(GJGameLevel* level, From from, CCNode* owner) {
     m_buttonMenu->addChildAtPosition(m_deleteBtn, Anchor::BottomLeft, {360.f, 46.f});
 
     // row 2: which run you see, zoom, share codes
-    m_buttonMenu->addChildAtPosition(arrowButton(false, 0.35f, [this](auto) { this->onRun(-1); }), Anchor::BottomLeft, {28.f, 18.f});
-    m_buttonMenu->addChildAtPosition(arrowButton(true, 0.35f, [this](auto) { this->onRun(1); }), Anchor::BottomLeft, {222.f, 18.f});
+    m_showDeaths = Mod::get()->getSavedValue<bool>("map-deaths", false);
+    m_deathsBtn = textButton(m_showDeaths ? "Deaths: on" : "Deaths: off", "GJ_button_04.png", 0.42f, [this](auto) { this->onToggleDeaths(); });
+    m_buttonMenu->addChildAtPosition(m_deathsBtn, Anchor::BottomLeft, {48.f, 18.f});
     m_runLabel = CCLabelBMFont::create("", "bigFont.fnt");
-    m_runLabel->setPosition({125.f, 18.f});
+    m_runLabel->setPosition({165.f, 18.f});
     m_mainLayer->addChild(m_runLabel);
     m_buttonMenu->addChildAtPosition(textButton("-", "GJ_button_04.png", 0.5f, [this](auto) { this->onZoom(1.f / 1.5f); }), Anchor::BottomLeft, {256.f, 18.f});
     m_buttonMenu->addChildAtPosition(textButton("+", "GJ_button_04.png", 0.5f, [this](auto) { this->onZoom(1.5f); }), Anchor::BottomLeft, {286.f, 18.f});
     m_buttonMenu->addChildAtPosition(textButton("Copy code", "GJ_button_04.png", 0.42f, [this](auto) { this->onCopy(); }), Anchor::BottomLeft, {340.f, 18.f});
     m_buttonMenu->addChildAtPosition(textButton("Paste", "GJ_button_04.png", 0.42f, [this](auto) { this->onPaste(); }), Anchor::BottomLeft, {404.f, 18.f});
 
-    this->collectRuns();
+    m_line = bestLine(runData(m_level));
     this->reload();
     float fx = m_sel > 0 ? m_starts[m_sel - 1].x : 0.f;
     float fy = m_sel > 0 ? m_starts[m_sel - 1].y : 105.f;
@@ -133,17 +140,6 @@ void MapPopup::reload() {
     this->updateInfo();
 }
 
-void MapPopup::collectRuns() {
-    auto& runs = runData(m_level);
-    m_runs.clear();
-    std::vector<Attempt const*> bests;
-    for (auto& a : runs.bests) bests.push_back(&a);
-    std::sort(bests.begin(), bests.end(), [](auto a, auto b) { return a->startX < b->startX; });
-    for (auto a : bests) m_runs.push_back(a);
-    for (auto it = runs.recent.rbegin(); it != runs.recent.rend(); ++it) m_runs.push_back(&*it);
-    m_runIdx = 0;
-}
-
 void MapPopup::updateStats() {
     auto& runs = runData(m_level);
     std::string text = fmt::format("Attempts {}   Deaths {}   Best {}%", runs.attempts, runs.deaths, pct(runs.bestFromStart));
@@ -156,17 +152,14 @@ void MapPopup::updateStats() {
     m_stats->setString(text.c_str());
     m_stats->limitLabelWidth(400.f, 0.42f, 0.1f);
 
-    if (m_runs.empty()) {
-        m_runLabel->setString("No runs yet: play the level!");
+    if (m_line.path.empty()) {
+        m_runLabel->setString("No tries yet: play the level!");
     }
     else {
-        auto a = m_runs[m_runIdx];
-        bool isBest = m_runIdx < static_cast<int>(runData(m_level).bests.size());
-        std::string what = isBest ? fmt::format("Best from {}%", pct(a->startX)) : fmt::format("Attempt {}", a->number);
-        m_runLabel->setString(fmt::format("{}: {}%  {} jumps{}", what, a->completed ? 100 : pct(a->endX), a->clicks.size(),
-                                          a->practice ? " (practice)" : "").c_str());
+        m_runLabel->setString(fmt::format("Best try: {}% to {}%  ({} jumps)", pct(m_line.from),
+                                          m_line.completed ? 100 : pct(m_line.to), m_line.clicks.size()).c_str());
     }
-    m_runLabel->limitLabelWidth(170.f, 0.35f, 0.1f);
+    m_runLabel->limitLabelWidth(160.f, 0.35f, 0.1f);
 }
 
 void MapPopup::redraw() {
@@ -176,9 +169,9 @@ void MapPopup::redraw() {
 
     // the level: blocks, orbs/pads/portals, hazards
     for (auto& r : m_parsed->cells) {
-        ccColor4F c = r.type == 3 ? ccColor4F{1.f, 0.3f, 0.3f, 0.75f}
-                    : r.type == 2 ? ccColor4F{1.f, 0.8f, 0.25f, 0.8f}
-                    : ccColor4F{0.75f, 0.78f, 0.9f, 0.35f};
+        ccColor4F c = r.type == 3 ? ccColor4F{0.9f, 0.3f, 0.3f, 0.45f}
+                    : r.type == 2 ? ccColor4F{1.f, 0.8f, 0.25f, 0.45f}
+                    : ccColor4F{0.6f, 0.65f, 0.8f, 0.22f};
         CCPoint a = {r.cx0 * 30.f * s, r.cy * 30.f * s};
         CCPoint b = {(r.cx1 + 1) * 30.f * s, (r.cy + 1) * 30.f * s};
         m_draw->drawRect(a, b, c, 0.f, c);
@@ -195,51 +188,49 @@ void MapPopup::redraw() {
         m_labels->addChild(l);
     }
 
-    // where you died
+    // where you died (only if you turn it on)
     auto& runs = runData(m_level);
-    size_t from = runs.deathPoints.size() > 1500 ? runs.deathPoints.size() - 1500 : 0;
-    for (size_t i = from; i < runs.deathPoints.size(); i++) {
-        auto p = toMap(runs.deathPoints[i].x, runs.deathPoints[i].y);
-        float r = 2.2f;
-        m_draw->drawSegment({p.x - r, p.y - r}, {p.x + r, p.y + r}, 0.5f, {1, 0.25f, 0.25f, 0.6f});
-        m_draw->drawSegment({p.x - r, p.y + r}, {p.x + r, p.y - r}, 0.5f, {1, 0.25f, 0.25f, 0.6f});
+    if (m_showDeaths) {
+        size_t from = runs.deathPoints.size() > 1500 ? runs.deathPoints.size() - 1500 : 0;
+        for (size_t i = from; i < runs.deathPoints.size(); i++) {
+            auto p = toMap(runs.deathPoints[i].x, runs.deathPoints[i].y);
+            float r = 2.2f;
+            m_draw->drawSegment({p.x - r, p.y - r}, {p.x + r, p.y + r}, 0.5f, {1, 0.25f, 0.25f, 0.6f});
+            m_draw->drawSegment({p.x - r, p.y + r}, {p.x + r, p.y - r}, 0.5f, {1, 0.25f, 0.25f, 0.6f});
+        }
     }
 
-    // your runs: the chosen one in colour (one colour per gamemode), the others faint
-    auto drawPath = [&](Attempt const& a, bool main) {
+    // your best try: one thick line with a dark border, colour = gamemode, white dots = jumps
+    for (int pass = 0; pass < 2; pass++) {
         CCPoint last;
         bool has = false;
-        for (auto& smp : a.path) {
+        for (auto& smp : m_line.path) {
             auto p = toMap(smp.x, smp.y);
-            if (has && (p - last).getLength() < 1.5f && &smp != &a.path.back()) continue;
+            if (smp.flags & 0x80) has = false;
+            if (has && (p - last).getLength() < 1.5f && &smp != &m_line.path.back()) continue;
             if (has) {
-                auto c = main ? col(modeColor(smp.mode), 0.95f) : ccColor4F{1, 1, 1, 0.16f};
-                m_draw->drawSegment(last, p, main ? 0.9f : 0.45f, c);
+                if (pass == 0) m_draw->drawSegment(last, p, 2.4f, {0, 0, 0, 0.8f});
+                else m_draw->drawSegment(last, p, 1.4f, col(modeColor(smp.mode), 1.f));
             }
             last = p;
             has = true;
         }
-    };
-    Attempt const* shown = m_runs.empty() ? nullptr : m_runs[m_runIdx];
-    for (auto& a : runs.recent) if (&a != shown) drawPath(a, false);
-    if (shown) {
-        drawPath(*shown, true);
-        for (auto& c : shown->clicks) m_draw->drawDot(toMap(c.x, c.y), 1.3f, {1, 1, 1, 0.9f});
-        if (shown->died) {
-            auto p = toMap(shown->endX, shown->endY);
-            m_draw->drawDot(p, 3.f, {1, 0.15f, 0.15f, 1});
-        }
+    }
+    for (auto& c : m_line.clicks) {
+        auto p = toMap(c.x, c.y);
+        m_draw->drawDot(p, 2.4f, {0, 0, 0, 0.85f});
+        m_draw->drawDot(p, 1.6f, {1, 1, 1, 1});
     }
 
     // flags: start of the level + every StartPos
     auto flag = [&](float x, float y, ccColor4F c, std::string const& text) {
         auto p = toMap(x, y);
-        m_draw->drawSegment({p.x, p.y - 3}, {p.x, p.y + 13}, 0.6f, c);
-        CCPoint tri[3] = {{p.x, p.y + 13}, {p.x + 9, p.y + 10}, {p.x, p.y + 7}};
+        m_draw->drawSegment({p.x, p.y - 3}, {p.x, p.y + 14}, 0.8f, c);
+        CCPoint tri[3] = {{p.x, p.y + 14}, {p.x + 11, p.y + 10.5f}, {p.x, p.y + 7}};
         m_draw->drawPolygon(tri, 3, c, 0.f, c);
         auto l = CCLabelBMFont::create(text.c_str(), "bigFont.fnt");
-        l->setScale(0.22f);
-        l->setPosition({p.x + 3, p.y + 19});
+        l->setScale(0.3f);
+        l->setPosition({p.x + 4, p.y + 21});
         m_labels->addChild(l);
     };
     flag(0, LEVEL_Y_OFFSET + 15, {0.35f, 1, 0.35f, 1}, "Start");
@@ -338,38 +329,39 @@ void MapPopup::handleTap(CCPoint mapPoint) {
     // a jump or a point of your run?
     m_point.reset();
     m_pointJump = -1;
-    if (!m_runs.empty()) {
-        auto run = m_runs[m_runIdx];
+    if (!m_line.path.empty()) {
+        auto& line = m_line;
         auto nearestSample = [&](float x) -> Sample const* {
             Sample const* out = nullptr;
             float d = 1e9f;
-            for (auto& s : run->path) {
+            for (auto& s : line.path) {
                 if (std::abs(s.x - x) < d) { d = std::abs(s.x - x); out = &s; }
             }
             return out;
         };
-        float bestJump = 9.f;
+        float bestJump = 10.f;
         int jump = -1;
-        for (size_t i = 0; i < run->clicks.size(); i++) {
-            float d = (toMap(run->clicks[i].x, run->clicks[i].y) - c).getLength();
+        for (size_t i = 0; i < line.clicks.size(); i++) {
+            float d = (toMap(line.clicks[i].x, line.clicks[i].y) - c).getLength();
             if (d < bestJump) { bestJump = d; jump = static_cast<int>(i); }
         }
         if (jump >= 0) {
-            if (auto s = nearestSample(run->clicks[jump].x)) {
+            if (auto s = nearestSample(line.clicks[jump].x)) {
                 Sample p = *s;
-                p.x = run->clicks[jump].x;
-                p.y = run->clicks[jump].y;
+                p.x = line.clicks[jump].x;
+                p.y = line.clicks[jump].y;
                 m_point = p;
                 m_pointJump = jump + 1;
             }
         }
         else {
-            float bestD = 10.f;
-            for (auto& s : run->path) {
+            float bestD = 12.f;
+            for (auto& s : line.path) {
                 float d = (toMap(s.x, s.y) - c).getLength();
                 if (d < bestD) { bestD = d; m_point = s; }
             }
         }
+        if (m_point) m_point->flags &= 0x7f;
     }
     this->drawOverlay();
     this->updateInfo();
@@ -486,16 +478,13 @@ void MapPopup::onZoom(float factor) {
     this->redraw();
 }
 
-void MapPopup::onRun(int dir) {
-    if (m_runs.empty()) return;
-    int n = static_cast<int>(m_runs.size());
-    m_runIdx = ((m_runIdx + dir) % n + n) % n;
-    m_point.reset();
-    auto a = m_runs[m_runIdx];
-    if (!a->path.empty()) this->focusX(a->path.front().x, a->path.front().y);
-    this->updateStats();
+void MapPopup::onToggleDeaths() {
+    m_showDeaths = !m_showDeaths;
+    Mod::get()->setSavedValue<bool>("map-deaths", m_showDeaths);
+    auto spr = ButtonSprite::create(m_showDeaths ? "Deaths: on" : "Deaths: off", "bigFont.fnt", "GJ_button_04.png", 0.8f);
+    spr->setScale(0.42f);
+    m_deathsBtn->setNormalImage(spr);
     this->redraw();
-    this->updateInfo();
 }
 
 bool MapPopup::ccTouchBegan(CCTouch* touch, CCEvent* event) {

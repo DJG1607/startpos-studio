@@ -97,6 +97,16 @@ struct RunData {
     void save();
 };
 
+// Your best try as one line, like a bot run: the best attempt from the start,
+// continued by the attempts (practice, StartPos) that got further.
+struct BestLine {
+    std::vector<Sample> path;      // a sample with flags & 0x80 starts a new piece (gap before it)
+    std::vector<CCPoint> clicks;   // the jumps of that line
+    float from = 0, to = 0;
+    bool completed = false;
+};
+BestLine bestLine(RunData const& runs);
+
 std::string levelKey(GJGameLevel* level);
 LevelData& levelData(GJGameLevel* level);
 RunData& runData(GJGameLevel* level);

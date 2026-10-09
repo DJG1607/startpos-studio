@@ -5,7 +5,7 @@
 	},
 	"id": "traxcerd.startpos-studio",
 	"name": "StartPos Studio",
-	"version": "v1.0.0",
+	"version": "v1.1.0",
 	"developer": "Traxcerd",
 	"description": "Pick your StartPos before playing, switch it in-game and place new ones with one key",
 	"tags": [
@@ -111,8 +111,8 @@
 		"show-deaths": {
 			"type": "bool",
 			"name": "Show where you died",
-			"description": "Draws a red X in the level everywhere you have died.",
-			"default": true
+			"description": "Draws a red X in the level everywhere you have died. Off by default; on the map there is a Deaths button too.",
+			"default": false
 		}
 	}
 }

@@ -12,11 +12,12 @@ Tap a flag and press **Play**: the level starts there.
 - **Shift + '**: deletes the StartPos you placed.
 - **Auto-fix**: when you fly through a StartPos, the mod checks it. If it has the wrong gamemode or speed, it fixes it (only for you).
 
-## Your runs
-The mod records your attempts: your path, every jump and where you died.
-- The map shows your best run in colour (one colour per gamemode), each jump as a white dot and your deaths as red X.
-- **Tap your line** (or a jump) and press **Place here** to put a StartPos exactly there.
-- A **ghost** of your best run plays next to you, and red X marks show where you died.
+## Your best try
+The mod records your attempts, like a bot: your path and every jump.
+- The map shows **only your best try** as one line (colour = gamemode), each jump as a white dot. If you got further in practice or from a StartPos, the line continues with that try.
+- **Tap your line** (or a jump) and press **Place here**: the StartPos gets the gamemode, speed, size and gravity you had there.
+- A **ghost** of your best try plays next to you.
+- Deaths are **optional**: press **Deaths** on the map, or turn on "Show where you died" in the settings to see red X in the level.
 
 ## Share
 **Copy code** puts your StartPos in a code (starts with `SPS1:`). Post it in the level comments or on Discord.
