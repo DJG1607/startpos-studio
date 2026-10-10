@@ -5,9 +5,9 @@
 	},
 	"id": "traxcerd.startpos-studio",
 	"name": "StartPos Studio",
-	"version": "v1.2.0",
+	"version": "v1.3.0",
 	"developer": "Traxcerd",
-	"description": "Pick your StartPos on a map, practise parts with a start and an end, place StartPos with one key",
+	"description": "Pick your StartPos on a map, name them, practise routes like 60% to 75% and place StartPos with one key",
 	"tags": [
 		"gameplay",
 		"interface",
@@ -78,10 +78,22 @@
 			"type": "title",
 			"name": "Look"
 		},
-		"show-hud": {
+		"show-percent": {
 			"type": "bool",
-			"name": "Info at the top left",
-			"description": "Shows your % and the goal of your part, clicks per second and clicks this try (it goes back to 0 when you die).",
+			"name": "Show your %",
+			"description": "Top left: your % (and the end of your route when you practise one).",
+			"default": true
+		},
+		"show-cps": {
+			"type": "bool",
+			"name": "Show clicks per second",
+			"description": "Top left: how many clicks you made in the last second.",
+			"default": true
+		},
+		"show-clicks": {
+			"type": "bool",
+			"name": "Show clicks this try",
+			"description": "Top left: your clicks in this try. Goes back to 0 when you die.",
 			"default": true
 		},
 		"progress-markers": {

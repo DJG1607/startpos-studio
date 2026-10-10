@@ -176,11 +176,26 @@ LevelData& levelData(GJGameLevel* level) {
             d.status[static_cast<int>(num(e, 0))] = static_cast<int>(num(e, 1));
         }
     }
-    if (auto arr = json.get("ends"); arr.isOk() && arr.unwrap().isArray()) {
-        for (auto& e : arr.unwrap()) d.ends[static_cast<int>(num(e, 0))] = static_cast<float>(num(e, 1));
+    if (auto arr = json.get("names"); arr.isOk() && arr.unwrap().isArray()) {
+        for (auto& e : arr.unwrap()) {
+            if (e.size() >= 2) d.names[static_cast<int>(num(e, 0))] = e[1].asString().unwrapOr("");
+        }
     }
-    if (auto arr = json.get("done"); arr.isOk() && arr.unwrap().isArray()) {
-        for (auto& e : arr.unwrap()) d.done[static_cast<int>(num(e, 0))] = static_cast<int>(num(e, 1));
+    if (auto arr = json.get("hidden"); arr.isOk() && arr.unwrap().isArray()) {
+        for (auto& e : arr.unwrap()) d.hidden.insert(static_cast<int>(e.asDouble().unwrapOr(0.0)));
+    }
+    if (auto arr = json.get("routes"); arr.isOk() && arr.unwrap().isArray()) {
+        for (auto& e : arr.unwrap()) {
+            LevelData::Route r;
+            r.startX = static_cast<float>(num(e, 0));
+            r.endX = static_cast<float>(num(e, 1));
+            r.done = static_cast<int>(num(e, 2));
+            if (e.size() >= 4) r.name = e[3].asString().unwrapOr("");
+            d.routes.push_back(r);
+        }
+    }
+    if (auto a = json.get("active"); a.isOk() && a.unwrap().isNumber()) {
+        d.active = static_cast<int>(a.unwrap().asDouble().unwrapOr(-1.0));
     }
     return d;
 }
@@ -212,33 +227,31 @@ void LevelData::save() {
         }));
     }
     json.set("status", matjson::Value(st));
-    std::vector<matjson::Value> en, dn;
-    for (auto& [k, x] : ends) {
-        en.push_back(matjson::Value(std::vector<matjson::Value>{
-            matjson::Value(static_cast<double>(k)), matjson::Value(static_cast<double>(x))
+    std::vector<matjson::Value> nm, hd, rt;
+    for (auto& [k, n] : names) {
+        nm.push_back(matjson::Value(std::vector<matjson::Value>{matjson::Value(static_cast<double>(k)), matjson::Value(n)}));
+    }
+    for (int k : hidden) hd.push_back(matjson::Value(static_cast<double>(k)));
+    for (auto& r : routes) {
+        rt.push_back(matjson::Value(std::vector<matjson::Value>{
+            matjson::Value(static_cast<double>(r.startX)), matjson::Value(static_cast<double>(r.endX)),
+            matjson::Value(static_cast<double>(r.done)), matjson::Value(r.name)
         }));
     }
-    for (auto& [k, n] : done) {
-        dn.push_back(matjson::Value(std::vector<matjson::Value>{
-            matjson::Value(static_cast<double>(k)), matjson::Value(static_cast<double>(n))
-        }));
-    }
-    json.set("ends", matjson::Value(en));
-    json.set("done", matjson::Value(dn));
+    json.set("names", matjson::Value(nm));
+    json.set("hidden", matjson::Value(hd));
+    json.set("routes", matjson::Value(rt));
+    json.set("active", matjson::Value(static_cast<double>(active)));
     Mod::get()->setSavedValue<matjson::Value>("lvl/" + key, json);
 }
 
-int sectionKey(float startX) {
-    return startX < 1.f ? -1 : static_cast<int>(std::round(startX));
+int startKey(float x) {
+    return x < 1.f ? -1 : static_cast<int>(std::round(x));
 }
 
-float sectionEnd(LevelData const& data, float startX, std::vector<float> const& startXs, float length) {
-    if (auto it = data.ends.find(sectionKey(startX)); it != data.ends.end() && it->second > startX + 30) {
-        return std::min(it->second, length);
-    }
-    float next = length;
-    for (float x : startXs) if (x > startX + 30 && x < next) next = x;
-    return next;
+std::string startName(LevelData const& data, float x, int number) {
+    if (auto it = data.names.find(startKey(x)); it != data.names.end() && !it->second.empty()) return it->second;
+    return number <= 0 ? "Start" : fmt::format("StartPos {}", number);
 }
 
 // ---------------------------------------------------------------- run data
@@ -614,6 +627,7 @@ std::vector<StartEntry> mergedStarts(GJGameLevel* level, ParsedLevel const& pars
     std::vector<StartEntry> out;
     for (auto e : parsed.starts) {
         int k = static_cast<int>(std::round(e.x));
+        if (data.hidden.contains(startKey(e.x))) continue;
         if (auto f = data.fixes.find(k); f != data.fixes.end()) {
             e.state = f->second;
             e.fixed = true;
@@ -631,6 +645,9 @@ std::vector<StartEntry> mergedStarts(GJGameLevel* level, ParsedLevel const& pars
         out.push_back(e);
     }
     std::stable_sort(out.begin(), out.end(), [](auto& a, auto& b) { return a.x < b.x; });
+    for (auto& e : out) {
+        if (auto it = data.names.find(startKey(e.x)); it != data.names.end()) e.name = it->second;
+    }
     return out;
 }
 

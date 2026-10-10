@@ -27,6 +27,22 @@ namespace {
         spr->setFlipX(right);
         return CCMenuItemExt::createSpriteExtra(spr, std::move(cb));
     }
+
+    CCMenu* fixedMenu(CCNode* parent) {
+        auto menu = CCMenu::create();
+        menu->setPosition({0.f, 0.f});
+        parent->addChild(menu, 10);
+        return menu;
+    }
+
+    void put(CCMenu* menu, CCMenuItemSpriteExtra* item, float x, float y) {
+        item->setPosition({x, y});
+        menu->addChild(item);
+    }
+
+    void routeName(LevelData::Route& r, MapPopup const* map) {
+        if (r.name.empty()) r.name = fmt::format("{}% to {}%", map->pct(r.startX), map->pct(r.endX));
+    }
 }
 
 MapPopup* MapPopup::create(GJGameLevel* level, From from, CCNode* owner) {
@@ -49,7 +65,7 @@ bool MapPopup::init(GJGameLevel* level, From from, CCNode* owner) {
     m_parsed = parseLevel(level);
     m_length = std::max(m_parsed->length, 300.f);
 
-    // map area
+    // the map
     auto bg = CCLayerColor::create({0, 0, 0, 140}, m_mapSize.width, m_mapSize.height);
     bg->setPosition(m_mapOrigin);
     m_mainLayer->addChild(bg);
@@ -75,59 +91,49 @@ bool MapPopup::init(GJGameLevel* level, From from, CCNode* owner) {
     m_mainLayer->addChild(frame, 2);
 
     m_stats = CCLabelBMFont::create("", "goldFont.fnt");
-    m_stats->setPosition({220.f, 263.f});
+    m_stats->setPosition({220.f, 262.f});
     m_mainLayer->addChild(m_stats);
-
-    // legend: what every thing on the map is
-    auto legend = CCLabelBMFont::create(
-        "Line = your best try (colour = gamemode)   White dots = your jumps   Flags = StartPos", "chatFont.fnt");
-    legend->setScale(0.48f);
+    auto legend = CCLabelBMFont::create("Line = your best try (with %)   Dots = your jumps   Flags = StartPos   Green = your route", "chatFont.fnt");
+    legend->setScale(0.46f);
+    legend->setOpacity(200);
     legend->setPosition({220.f, 249.f});
     m_mainLayer->addChild(legend);
-    auto hint = CCLabelBMFont::create("Drag to move.  Tap a flag to start there.  Tap your line to put a StartPos.  Set end = where that part finishes.", "chatFont.fnt");
-    hint->setScale(0.48f);
-    hint->setColor({255, 230, 120});
-    hint->setPosition({220.f, 86.f});
-    m_mainLayer->addChild(hint);
 
     m_info = CCLabelBMFont::create("", "bigFont.fnt");
-    m_info->setPosition({220.f, 72.f});
+    m_info->setPosition({220.f, 80.f});
     m_mainLayer->addChild(m_info);
+    m_hint = CCLabelBMFont::create("", "chatFont.fnt");
+    m_hint->setColor({255, 230, 120});
+    m_hint->setPosition({220.f, 64.f});
+    m_mainLayer->addChild(m_hint);
 
-    // all the buttons live in one menu with fixed positions (popup coordinates)
-    auto menu = CCMenu::create();
-    menu->setPosition({0.f, 0.f});
-    m_mainLayer->addChild(menu, 10);
-    auto put = [menu](CCMenuItemSpriteExtra* item, float x, float y) {
-        item->setPosition({x, y});
-        menu->addChild(item);
-    };
-
-    // row 1: choose StartPos, play, place, delete
-    put(arrowButton(false, 0.45f, [this](auto) { this->selectStart(m_sel - 1); }), 32.f, 46.f);
-    put(arrowButton(true, 0.45f, [this](auto) { this->selectStart(m_sel + 1); }), 66.f, 46.f);
+    auto menu = fixedMenu(m_mainLayer);
+    // row 1: what to do with the chosen StartPos (or the point of your line)
+    put(menu, arrowButton(false, 0.42f, [this](auto) { this->selectStart(m_sel - 1); }), 30.f, 40.f);
+    put(menu, arrowButton(true, 0.42f, [this](auto) { this->selectStart(m_sel + 1); }), 62.f, 40.f);
     m_playBtn = textButton(m_from == From::Pause ? "Go" : "Play", "GJ_button_01.png", 0.6f, [this](auto) { this->onPlay(); });
-    put(m_playBtn, 118.f, 46.f);
-    m_endBtn = textButton("Set end", "GJ_button_05.png", 0.5f, [this](auto) { this->onSetEnd(); });
-    put(m_endBtn, 192.f, 46.f);
-    m_placeBtn = textButton("Place here", "GJ_button_02.png", 0.5f, [this](auto) { this->onPlace(); });
-    put(m_placeBtn, 282.f, 46.f);
+    put(menu, m_playBtn, 120.f, 40.f);
+    m_renameBtn = textButton("Rename", "GJ_button_05.png", 0.5f, [this](auto) { this->onRename(); });
+    put(menu, m_renameBtn, 205.f, 40.f);
     m_deleteBtn = textButton("Delete", "GJ_button_06.png", 0.5f, [this](auto) { this->onDelete(); });
-    put(m_deleteBtn, 372.f, 46.f);
+    put(menu, m_deleteBtn, 285.f, 40.f);
+    m_placeBtn = textButton("Add StartPos here", "GJ_button_02.png", 0.5f, [this](auto) { this->onPlace(); });
+    put(menu, m_placeBtn, 245.f, 40.f);
 
-    // row 2: which run you see, zoom, share codes
+    // row 2: routes, watch, deaths, zoom, share
+    put(menu, textButton("Routes", "GJ_button_01.png", 0.45f, [this](auto) {
+        if (auto p = RoutesPopup::create(this)) p->show();
+    }), 52.f, 14.f);
+    m_watchBtn = textButton("Watch", "GJ_button_04.png", 0.45f, [this](auto) { this->onWatch(); });
+    put(menu, m_watchBtn, 124.f, 14.f);
     m_showDeaths = deathsVisible();
     m_deathsBtn = textButton(m_showDeaths ? "Deaths: on" : "Deaths: off", "GJ_button_04.png", 0.42f, [this](auto) { this->onToggleDeaths(); });
-    put(m_deathsBtn, 56.f, 18.f);
-    m_watchBtn = textButton("Watch", "GJ_button_01.png", 0.42f, [this](auto) { this->onWatch(); });
-    put(m_watchBtn, 140.f, 18.f);
-    m_runLabel = CCLabelBMFont::create("", "bigFont.fnt");
-    m_runLabel->setVisible(false);
-    m_mainLayer->addChild(m_runLabel);
-    put(textButton("-", "GJ_button_04.png", 0.5f, [this](auto) { this->onZoom(1.f / 1.5f); }), 256.f, 18.f);
-    put(textButton("+", "GJ_button_04.png", 0.5f, [this](auto) { this->onZoom(1.5f); }), 286.f, 18.f);
-    put(textButton("Copy code", "GJ_button_04.png", 0.42f, [this](auto) { this->onCopy(); }), 340.f, 18.f);
-    put(textButton("Paste", "GJ_button_04.png", 0.42f, [this](auto) { this->onPaste(); }), 404.f, 18.f);
+    put(menu, m_deathsBtn, 208.f, 14.f);
+    put(menu, textButton("-", "GJ_button_04.png", 0.5f, [this](auto) { this->onZoom(1.f / 1.5f); }), 276.f, 14.f);
+    put(menu, textButton("+", "GJ_button_04.png", 0.5f, [this](auto) { this->onZoom(1.5f); }), 304.f, 14.f);
+    put(menu, textButton("Share", "GJ_button_04.png", 0.45f, [this](auto) {
+        if (auto p = SharePopup::create(this)) p->show();
+    }), 372.f, 14.f);
 
     m_line = bestLine(runData(m_level));
     this->reload();
@@ -140,6 +146,14 @@ bool MapPopup::init(GJGameLevel* level, From from, CCNode* owner) {
 
 int MapPopup::pct(float x) const {
     return std::clamp(static_cast<int>(x / m_length * 100.f), 0, 100);
+}
+
+float MapPopup::selStart() const {
+    return m_sel == 0 ? 0.f : m_starts[m_sel - 1].x;
+}
+
+std::string MapPopup::selName() const {
+    return startName(levelData(m_level), this->selStart(), m_sel);
 }
 
 void MapPopup::reload() {
@@ -158,29 +172,26 @@ void MapPopup::reload() {
     this->updateInfo();
 }
 
+void MapPopup::refreshAll() {
+    this->reload();
+}
+
 void MapPopup::updateStats() {
     auto& runs = runData(m_level);
-    std::string text = fmt::format("Attempts {}   Deaths {}   Best {}%", runs.attempts, runs.deaths, pct(runs.bestFromStart));
-    if (!runs.deathPoints.empty()) {
-        std::vector<int> bins(101, 0);
-        for (auto& p : runs.deathPoints) bins[pct(p.x)]++;
-        int worst = static_cast<int>(std::max_element(bins.begin(), bins.end()) - bins.begin());
-        if (m_showDeaths) text += fmt::format("   Most deaths at {}%", worst);
+    std::string text = fmt::format("Attempts {}   Best {}%", runs.attempts, pct(runs.bestFromStart));
+    if (m_showDeaths) {
+        text += fmt::format("   Deaths {}", runs.deaths);
+        if (!runs.deathPoints.empty()) {
+            std::vector<int> bins(101, 0);
+            for (auto& p : runs.deathPoints) bins[pct(p.x)]++;
+            text += fmt::format(" (most at {}%)", static_cast<int>(std::max_element(bins.begin(), bins.end()) - bins.begin()));
+        }
     }
     if (m_line.path.empty()) text += "   No tries yet";
     else text += fmt::format("   Best try: {}% to {}% ({} jumps)", pct(m_line.from), m_line.completed ? 100 : pct(m_line.to),
                              m_line.clicks.size());
     m_stats->setString(text.c_str());
     m_stats->limitLabelWidth(410.f, 0.42f, 0.1f);
-
-    if (m_line.path.empty()) {
-        m_runLabel->setString("No tries yet: play the level!");
-    }
-    else {
-        m_runLabel->setString(fmt::format("Best try: {}% to {}%  ({} jumps)", pct(m_line.from),
-                                          m_line.completed ? 100 : pct(m_line.to), m_line.clicks.size()).c_str());
-    }
-    m_runLabel->limitLabelWidth(160.f, 0.35f, 0.1f);
 }
 
 void MapPopup::redraw() {
@@ -199,15 +210,6 @@ void MapPopup::redraw() {
     }
     m_draw->drawSegment(toMap(0, LEVEL_Y_OFFSET), toMap(m_length, LEVEL_Y_OFFSET), 0.6f, {1, 1, 1, 0.5f});
     m_draw->drawSegment(toMap(m_length, LEVEL_Y_OFFSET), toMap(m_length, LEVEL_Y_OFFSET + 900), 0.8f, {0.3f, 1, 0.3f, 0.7f});
-    for (int i = 1; i < 10; i++) {
-        float x = m_length * i / 10.f;
-        m_draw->drawSegment(toMap(x, LEVEL_Y_OFFSET - 25), toMap(x, LEVEL_Y_OFFSET), 0.4f, {1, 1, 1, 0.35f});
-        auto l = CCLabelBMFont::create(fmt::format("{}%", i * 10).c_str(), "chatFont.fnt");
-        l->setScale(0.4f);
-        l->setOpacity(150);
-        l->setPosition(toMap(x, LEVEL_Y_OFFSET - 40));
-        m_labels->addChild(l);
-    }
 
     // where you died (only if you turn it on)
     auto& runs = runData(m_level);
@@ -221,7 +223,7 @@ void MapPopup::redraw() {
         }
     }
 
-    // your best try: one thick line with a dark border, colour = gamemode, white dots = jumps
+    // your best try: thick line with a dark border, colour = gamemode
     for (int pass = 0; pass < 2; pass++) {
         CCPoint last;
         bool has = false;
@@ -243,58 +245,72 @@ void MapPopup::redraw() {
         m_draw->drawDot(p, 1.6f, {1, 1, 1, 1});
     }
 
-    // flags: start of the level + every StartPos
+    // the % on your line (every 10%, every 5% when you zoom in)
+    int step = m_zoom >= 0.2f ? 5 : 10;
+    if (!m_line.path.empty()) {
+        float minX = m_line.path.front().x, maxX = m_line.path.back().x;
+        for (int pc = step; pc < 100; pc += step) {
+            float x = m_length * pc / 100.f;
+            if (x < minX || x > maxX) continue;
+            Sample const* near = nullptr;
+            float d = 1e9f;
+            for (auto& smp : m_line.path) {
+                if (std::abs(smp.x - x) < d) { d = std::abs(smp.x - x); near = &smp; }
+            }
+            if (!near || d > 60.f) continue;
+            auto p = toMap(near->x, near->y);
+            m_draw->drawDot(p, 2.6f, {1, 0.85f, 0.2f, 1});
+            auto l = CCLabelBMFont::create(fmt::format("{}%", pc).c_str(), "bigFont.fnt");
+            l->setScale(0.26f);
+            l->setColor({255, 220, 60});
+            l->setPosition({p.x, p.y - 9});
+            m_labels->addChild(l);
+        }
+    }
+    else {
+        for (int pc = 10; pc < 100; pc += 10) {
+            float x = m_length * pc / 100.f;
+            m_draw->drawSegment(toMap(x, LEVEL_Y_OFFSET - 25), toMap(x, LEVEL_Y_OFFSET), 0.4f, {1, 1, 1, 0.35f});
+            auto l = CCLabelBMFont::create(fmt::format("{}%", pc).c_str(), "chatFont.fnt");
+            l->setScale(0.4f);
+            l->setOpacity(150);
+            l->setPosition(toMap(x, LEVEL_Y_OFFSET - 40));
+            m_labels->addChild(l);
+        }
+    }
+
+    // flags: start of the level + every StartPos, with their names
+    auto& data = levelData(m_level);
     auto flag = [&](float x, float y, ccColor4F c, std::string const& text) {
         auto p = toMap(x, y);
         m_draw->drawSegment({p.x, p.y - 3}, {p.x, p.y + 14}, 0.8f, c);
         CCPoint tri[3] = {{p.x, p.y + 14}, {p.x + 11, p.y + 10.5f}, {p.x, p.y + 7}};
         m_draw->drawPolygon(tri, 3, c, 0.f, c);
         auto l = CCLabelBMFont::create(text.c_str(), "bigFont.fnt");
-        l->setScale(0.3f);
+        l->setScale(0.28f);
         l->setPosition({p.x + 4, p.y + 21});
         m_labels->addChild(l);
     };
-    auto& data = levelData(m_level);
-    auto doneMark = [&](float x, float y) {
-        auto it = data.done.find(sectionKey(x));
-        if (it == data.done.end() || it->second <= 0) return;
-        auto p = toMap(x, y);
-        auto l = CCLabelBMFont::create(fmt::format("done x{}", it->second).c_str(), "bigFont.fnt");
-        l->setScale(0.22f);
-        l->setColor({90, 255, 90});
-        l->setPosition({p.x + 4, p.y - 9});
-        m_labels->addChild(l);
-    };
-    flag(0, LEVEL_Y_OFFSET + 15, {0.35f, 1, 0.35f, 1}, "Start");
-    doneMark(0, LEVEL_Y_OFFSET + 15);
+    flag(0, LEVEL_Y_OFFSET + 15, {0.35f, 1, 0.35f, 1}, startName(data, 0, 0));
     for (size_t i = 0; i < m_starts.size(); i++) {
         auto& e = m_starts[i];
         ccColor4F c = e.custom ? ccColor4F{0.25f, 0.9f, 1, 1} : e.fixed ? ccColor4F{1, 0.85f, 0.2f, 1} : ccColor4F{1, 1, 1, 1};
-        flag(e.x, e.y, c, fmt::format("{}", i + 1));
-        doneMark(e.x, e.y);
+        flag(e.x, e.y, c, e.name.empty() ? fmt::format("{}", i + 1) : e.name);
     }
     this->drawOverlay();
 }
 
-float MapPopup::selStart() const {
-    return m_sel == 0 ? 0.f : m_starts[m_sel - 1].x;
-}
-
-float MapPopup::selEnd() const {
-    std::vector<float> xs;
-    for (auto& e : m_starts) xs.push_back(e.x);
-    return sectionEnd(levelData(m_level), this->selStart(), xs, m_length);
-}
-
 void MapPopup::drawOverlay() {
     m_overlay->clear();
-    {
-        float x0 = this->selStart(), x1 = this->selEnd();
+    // your active route: green from its StartPos to its end, with a chequered flag
+    auto& data = levelData(m_level);
+    m_endLabel->setVisible(false);
+    if (auto r = data.activeRoute()) {
         float top = std::max(m_parsed->maxY + 150.f, 450.f);
-        m_overlay->drawRect(toMap(x0, 0), toMap(x1, top), {0.3f, 1, 0.3f, 0.07f}, 0.f, {0, 0, 0, 0});
-        auto e0 = toMap(x1, LEVEL_Y_OFFSET), e1 = toMap(x1, LEVEL_Y_OFFSET + 300);
+        m_overlay->drawRect(toMap(r->startX, 0), toMap(r->endX, top), {0.3f, 1, 0.3f, 0.09f}, 0.f, {0, 0, 0, 0});
+        auto e0 = toMap(r->endX, LEVEL_Y_OFFSET), e1 = toMap(r->endX, LEVEL_Y_OFFSET + 300);
         m_overlay->drawSegment(e0, e1, 1.f, {1, 0.35f, 0.35f, 0.9f});
-        for (int i = 0; i < 4; i++) {  // a small chequered flag
+        for (int i = 0; i < 4; i++) {
             for (int j = 0; j < 2; j++) {
                 bool white = (i + j) % 2 == 0;
                 CCPoint a = {e1.x + i * 3.f, e1.y - (j + 1) * 3.f};
@@ -303,43 +319,54 @@ void MapPopup::drawOverlay() {
                 m_overlay->drawRect(a, b, c, 0.f, c);
             }
         }
-        m_endLabel->setPosition({e1.x + 6, e1.y + 7});
+        m_endLabel->setString(fmt::format("END {}%", pct(r->endX)).c_str());
+        m_endLabel->setPosition({e1.x + 8, e1.y + 7});
+        m_endLabel->setVisible(true);
     }
-    CCPoint p = m_sel == 0 ? toMap(0, LEVEL_Y_OFFSET + 15) : toMap(m_starts[m_sel - 1].x, m_starts[m_sel - 1].y);
-    if (!m_point) {
-        m_overlay->drawCircle({p.x + 3, p.y + 8}, 11.f, {0.3f, 1, 0.3f, 0.12f}, 1.2f, {0.3f, 1, 0.3f, 1}, 32);
-    }
-    else {
+    // what you chose
+    if (m_point) {
         auto q = toMap(m_point->x, m_point->y);
         m_overlay->drawCircle(q, 6.f, {1, 1, 0.2f, 0.25f}, 1.2f, {1, 1, 0.2f, 1}, 24);
+    }
+    else {
+        CCPoint p = m_sel == 0 ? toMap(0, LEVEL_Y_OFFSET + 15) : toMap(m_starts[m_sel - 1].x, m_starts[m_sel - 1].y);
+        m_overlay->drawCircle({p.x + 3, p.y + 8}, 11.f, {0.3f, 1, 0.3f, 0.12f}, 1.2f, {0.3f, 1, 0.3f, 1}, 32);
     }
 }
 
 void MapPopup::updateInfo() {
-    std::string text;
+    std::string text, hint;
     bool custom = false;
-    if (m_settingEnd) {
-        text = "Tap the map where this part should end (tap before its flag to go back to the next StartPos)";
+    if (m_pickingEnd) {
+        text = fmt::format("New route from {} ({}%)", this->selName(), pct(this->selStart()));
+        hint = "Tap the map where the route should end";
     }
     else if (m_point) {
         auto st = sampleState(*m_point);
         text = m_pointJump > 0 ? fmt::format("Jump {} at {}%: {}", m_pointJump, pct(m_point->x), describe(st))
-                               : fmt::format("Your run at {}%: {}", pct(m_point->x), describe(st));
+                               : fmt::format("Your line at {}%: {}", pct(m_point->x), describe(st));
+        hint = "Press Add StartPos here to put one exactly there";
     }
     else if (m_sel == 0) {
-        text = fmt::format("From the start: {}   Goal {}%", describe(m_parsed->startState), pct(this->selEnd()));
+        text = fmt::format("{}: {}", this->selName(), describe(m_parsed->startState));
+        hint = "Tap a flag to choose it, tap your line to add a StartPos, drag to move";
     }
     else {
         auto& e = m_starts[m_sel - 1];
         custom = e.custom;
-        text = fmt::format("StartPos {} at {}%: {}{}   Goal {}%", m_sel, pct(e.x), describe(e.state),
-                           e.custom ? " (yours)" : e.fixed ? " (fixed)" : e.status == 1 ? " (checked)" : "",
-                           pct(this->selEnd()));
+        text = fmt::format("{} at {}%: {}{}", this->selName(), pct(e.x), describe(e.state),
+                           e.custom ? " (yours)" : e.fixed ? " (fixed)" : e.status == 1 ? " (checked)" : "");
+        hint = "Play starts here. Routes lets you practise from here to where you want.";
     }
+    (void)custom;
     m_info->setString(text.c_str());
     m_info->limitLabelWidth(400.f, 0.36f, 0.1f);
-    m_placeBtn->setVisible(m_point.has_value());
-    m_deleteBtn->setVisible(!m_point && custom);
+    m_hint->setString(hint.c_str());
+    m_hint->limitLabelWidth(400.f, 0.5f, 0.1f);
+    bool onLine = m_point.has_value();
+    m_placeBtn->setVisible(onLine && !m_pickingEnd);
+    m_renameBtn->setVisible(!onLine && !m_pickingEnd);
+    m_deleteBtn->setVisible(!onLine && !m_pickingEnd && m_sel > 0);
 }
 
 void MapPopup::clampCanvas() {
@@ -362,13 +389,13 @@ void MapPopup::selectStart(int sel) {
     int n = static_cast<int>(m_starts.size());
     m_sel = ((sel % (n + 1)) + (n + 1)) % (n + 1);
     m_point.reset();
+    m_pickingEnd = false;
     auto& data = levelData(m_level);
     data.hasChoice = true;
     data.choiceX = m_sel == 0 ? -1.f : m_starts[m_sel - 1].x;
     data.save();
-    float x = m_sel == 0 ? 0.f : m_starts[m_sel - 1].x;
+    float x = this->selStart();
     float y = m_sel == 0 ? LEVEL_Y_OFFSET + 15 : m_starts[m_sel - 1].y;
-    // keep the flag on screen
     float px = m_canvas->getPositionX() + x * m_zoom;
     if (px < 20 || px > m_mapSize.width - 20) this->focusX(x, y);
     this->drawOverlay();
@@ -377,15 +404,23 @@ void MapPopup::selectStart(int sel) {
 
 void MapPopup::handleTap(CCPoint mapPoint) {
     CCPoint c = mapPoint - m_canvas->getPosition();
-    if (m_settingEnd) {
-        float x = c.x / m_zoom;
+    if (m_pickingEnd) {
+        float x = std::min(c.x / m_zoom, m_length);
+        m_pickingEnd = false;
+        if (x <= this->selStart() + 30) {
+            Notification::create("The end has to be after the start", NotificationIcon::Info)->show();
+            this->updateInfo();
+            return;
+        }
         auto& data = levelData(m_level);
-        int key = sectionKey(this->selStart());
-        if (x > this->selStart() + 30) data.ends[key] = std::min(x, m_length);
-        else data.ends.erase(key);
+        LevelData::Route r;
+        r.startX = this->selStart();
+        r.endX = x;
+        routeName(r, this);
+        data.routes.push_back(r);
+        data.active = static_cast<int>(data.routes.size()) - 1;
         data.save();
-        m_settingEnd = false;
-        this->setText(m_endBtn, "Set end");
+        Notification::create(fmt::format("Route \"{}\" ready: press Play", r.name), NotificationIcon::Success)->show();
         this->drawOverlay();
         this->updateInfo();
         return;
@@ -404,7 +439,7 @@ void MapPopup::handleTap(CCPoint mapPoint) {
         this->selectStart(hit);
         return;
     }
-    // a jump or a point of your run?
+    // a jump or a point of your line?
     m_point.reset();
     m_pointJump = -1;
     if (!m_line.path.empty()) {
@@ -445,10 +480,22 @@ void MapPopup::handleTap(CCPoint mapPoint) {
     this->updateInfo();
 }
 
+void MapPopup::setText(CCMenuItemSpriteExtra* item, char const* text) {
+    if (auto spr = typeinfo_cast<ButtonSprite*>(item->getNormalImage())) {
+        spr->setString(text);
+        item->setContentSize(spr->getScaledContentSize());
+        spr->setPosition(item->getContentSize() / 2);
+    }
+}
+
+// ---------------------------------------------------------------- buttons
+
 void MapPopup::onPlay() {
     auto& data = levelData(m_level);
     data.hasChoice = true;
     data.choiceX = m_sel == 0 ? -1.f : m_starts[m_sel - 1].x;
+    // a route only applies when you start on its StartPos
+    if (auto r = data.activeRoute(); r && std::abs(r->startX - this->selStart()) > 20) data.active = -1;
     data.save();
     float x = data.choiceX;
     Ref<CCNode> owner = m_owner;
@@ -466,6 +513,35 @@ void MapPopup::onPlay() {
     }
 }
 
+void MapPopup::playRoute(int index) {
+    auto& data = levelData(m_level);
+    if (index < 0 || index >= static_cast<int>(data.routes.size())) return;
+    float sx = data.routes[index].startX;
+    this->reload();
+    int sel = 0;
+    float best = 3.f;
+    for (size_t i = 0; i < m_starts.size(); i++) {
+        float d = std::abs(m_starts[i].x - sx);
+        if (d < best) { best = d; sel = static_cast<int>(i) + 1; }
+    }
+    if (sx >= 1.f && sel == 0) {
+        Notification::create("The StartPos of this route is gone", NotificationIcon::Error)->show();
+        return;
+    }
+    m_sel = sel;
+    data.active = index;
+    data.save();
+    this->onPlay();
+}
+
+void MapPopup::beginNewRoute() {
+    m_pickingEnd = true;
+    m_point.reset();
+    if (m_watching) this->stopWatch();
+    this->drawOverlay();
+    this->updateInfo();
+}
+
 void MapPopup::onPlace() {
     if (!m_point) return;
     SavedStart c;
@@ -481,37 +557,61 @@ void MapPopup::onPlace() {
     if (m_from == From::Pause) studioRebuild();
     m_point.reset();
     this->reload();
-    Notification::create(fmt::format("StartPos placed at {}%: {}", pct(c.x), describe(c.state)), NotificationIcon::Success)->show();
+    Notification::create(fmt::format("StartPos added at {}%: {}", pct(c.x), describe(c.state)), NotificationIcon::Success)->show();
+}
+
+void MapPopup::onRename() {
+    Ref<MapPopup> self = this;
+    float x = this->selStart();
+    auto popup = NamePopup::create(fmt::format("Name for {}", this->selName()), this->selName(), [self, x](std::string name) {
+        auto& data = levelData(self->m_level);
+        if (name.empty()) data.names.erase(startKey(x));
+        else data.names[startKey(x)] = name;
+        data.save();
+        self->reload();
+    });
+    if (popup) popup->show();
 }
 
 void MapPopup::onDelete() {
-    if (m_sel == 0 || !m_starts[m_sel - 1].custom) return;
-    float x = m_starts[m_sel - 1].x;
+    if (m_sel == 0) return;
+    auto e = m_starts[m_sel - 1];
     auto& data = levelData(m_level);
-    std::erase_if(data.custom, [&](auto& c) { return std::abs(c.x - x) < 0.5f; });
+    if (e.custom) std::erase_if(data.custom, [&](auto& c) { return std::abs(c.x - e.x) < 0.5f; });
+    else data.hidden.insert(startKey(e.x));  // a StartPos of the level: hidden for you
+    data.names.erase(startKey(e.x));
     int prev = m_sel - 1;
     data.hasChoice = true;
     data.choiceX = prev == 0 ? -1.f : m_starts[prev - 1].x;
     data.save();
     if (m_from == From::Pause) studioRebuild();
     this->reload();
-    Notification::create("StartPos deleted", NotificationIcon::Success)->show();
+    Notification::create(e.custom ? "StartPos deleted" : "StartPos hidden (Share > Bring back to see it again)",
+                         NotificationIcon::Success)->show();
 }
 
-void MapPopup::onCopy() {
+void MapPopup::restoreHidden() {
+    auto& data = levelData(m_level);
+    size_t n = data.hidden.size();
+    data.hidden.clear();
+    data.save();
+    if (m_from == From::Pause) studioRebuild();
+    this->reload();
+    Notification::create(fmt::format("{} StartPos back", n), NotificationIcon::Success)->show();
+}
+
+void MapPopup::doCopy() {
     auto& data = levelData(m_level);
     if (data.custom.empty()) {
-        Notification::create("Place some StartPos of your own first", NotificationIcon::Info)->show();
+        Notification::create("Add some StartPos of your own first", NotificationIcon::Info)->show();
         return;
     }
     clipboard::write(makeShareCode(data));
-    Notification::create(
-        fmt::format("Code with {} StartPos copied! Paste it in the comments or on Discord", data.custom.size()),
-        NotificationIcon::Success
-    )->show();
+    Notification::create(fmt::format("Code with {} StartPos copied! Paste it in the comments or on Discord", data.custom.size()),
+                         NotificationIcon::Success)->show();
 }
 
-void MapPopup::onPaste() {
+void MapPopup::doPaste() {
     auto text = clipboard::read();
     LevelData tmp = levelData(m_level);
     bool other = false;
@@ -560,37 +660,12 @@ void MapPopup::onToggleDeaths() {
     m_showDeaths = !m_showDeaths;
     setDeathsVisible(m_showDeaths);
     studioDeathsChanged();
+    this->setText(m_deathsBtn, m_showDeaths ? "Deaths: on" : "Deaths: off");
     this->updateStats();
-    // change only the text, so the button stays where it is
-    if (auto spr = typeinfo_cast<ButtonSprite*>(m_deathsBtn->getNormalImage())) {
-        spr->setString(m_showDeaths ? "Deaths: on" : "Deaths: off");
-        m_deathsBtn->setContentSize(spr->getScaledContentSize());
-        spr->setPosition(m_deathsBtn->getContentSize() / 2);
-    }
     this->redraw();
-    auto& runs = runData(m_level);
-    if (m_showDeaths) {
-        Notification::create(runs.deathPoints.empty() ? std::string("No deaths saved yet in this level")
-                                                      : fmt::format("Showing {} deaths", runs.deathPoints.size()),
-                             NotificationIcon::Info)->show();
-    }
 }
 
-void MapPopup::setText(CCMenuItemSpriteExtra* item, char const* text) {
-    if (auto spr = typeinfo_cast<ButtonSprite*>(item->getNormalImage())) {
-        spr->setString(text);
-        item->setContentSize(spr->getScaledContentSize());
-        spr->setPosition(item->getContentSize() / 2);
-    }
-}
-
-void MapPopup::onSetEnd() {
-    m_settingEnd = !m_settingEnd;
-    m_point.reset();
-    this->setText(m_endBtn, m_settingEnd ? "Cancel" : "Set end");
-    this->drawOverlay();
-    this->updateInfo();
-}
+// ---------------------------------------------------------------- watch
 
 void MapPopup::onWatch() {
     if (m_watching) return this->stopWatch();
@@ -598,7 +673,6 @@ void MapPopup::onWatch() {
         Notification::create("Play the level first: then you can watch your best try", NotificationIcon::Info)->show();
         return;
     }
-    // one clock for the whole line (it can be made of several tries)
     m_watchTimes.clear();
     float offset = 0, last = 0;
     for (auto& smp : m_line.path) {
@@ -616,8 +690,7 @@ void MapPopup::onWatch() {
     m_watchIdx = 0;
     m_watching = true;
     m_point.reset();
-    m_settingEnd = false;
-    this->setText(m_endBtn, "Set end");
+    m_pickingEnd = false;
     this->setText(m_watchBtn, "Stop");
     this->schedule(schedule_selector(MapPopup::onTick));
     this->onTick(0);
@@ -639,8 +712,6 @@ void MapPopup::onTick(float dt) {
     while (m_watchIdx + 1 < path.size() && m_watchTimes[m_watchIdx + 1] <= m_watchT) m_watchIdx++;
     if (m_watchIdx + 1 >= path.size()) {
         this->stopWatch();
-        m_info->setString(m_line.completed ? "Your best try: level complete!" : fmt::format("Your best try ends at {}%", pct(m_line.to)).c_str());
-        m_info->limitLabelWidth(400.f, 0.36f, 0.1f);
         return;
     }
     auto& a = path[m_watchIdx];
@@ -658,14 +729,16 @@ void MapPopup::onTick(float dt) {
     float scale = std::clamp(m_zoom * 2.4f, 0.2f, 0.8f) * ((a.flags & 2) ? 0.6f : 1.f);
     m_watchIcon->setScaleX(scale);
     m_watchIcon->setScaleY((a.flags & 1) ? -scale : scale);
-    // the camera follows you
     auto pos = m_canvas->getPosition();
     CCPoint want = {m_mapSize.width * 0.4f - x * m_zoom, m_mapSize.height * 0.45f - y * m_zoom};
     m_canvas->setPosition({want.x, pos.y + (want.y - pos.y) * std::min(1.f, dt * 4.f)});
     this->clampCanvas();
     m_info->setString(fmt::format("Watching your best try: {}%   {}", pct(x), describe(sampleState(a))).c_str());
     m_info->limitLabelWidth(400.f, 0.36f, 0.1f);
+    m_hint->setString("Press Stop or tap the map to stop");
 }
+
+// ---------------------------------------------------------------- touches
 
 bool MapPopup::ccTouchBegan(CCTouch* touch, CCEvent* event) {
     auto p = m_mainLayer->convertToNodeSpace(touch->getLocation());
@@ -704,4 +777,180 @@ void MapPopup::ccTouchEnded(CCTouch* touch, CCEvent* event) {
 void MapPopup::ccTouchCancelled(CCTouch* touch, CCEvent* event) {
     m_dragging = false;
     Popup::ccTouchCancelled(touch, event);
+}
+
+// ================================================================ NamePopup
+
+NamePopup* NamePopup::create(std::string const& title, std::string const& current, geode::Function<void(std::string)> done) {
+    auto ret = new NamePopup();
+    if (ret->init(title, current, std::move(done))) {
+        ret->autorelease();
+        return ret;
+    }
+    delete ret;
+    return nullptr;
+}
+
+bool NamePopup::init(std::string const& title, std::string const& current, geode::Function<void(std::string)> done) {
+    if (!Popup::init(280.f, 140.f)) return false;
+    m_done = std::move(done);
+    this->setTitle(title);
+    m_input = TextInput::create(230.f, "Name");
+    m_input->setCommonFilter(CommonFilter::Any);
+    m_input->setMaxCharCount(24);
+    m_input->setString(current);
+    m_input->setPosition({140.f, 78.f});
+    m_mainLayer->addChild(m_input);
+    auto menu = fixedMenu(m_mainLayer);
+    put(menu, textButton("OK", "GJ_button_01.png", 0.7f, [this](auto) {
+        std::string name = m_input->getString();
+        auto done = std::move(m_done);
+        this->onClose(nullptr);
+        done(name);
+    }), 140.f, 30.f);
+    handleTouchPriority(this);
+    return true;
+}
+
+// ================================================================ RoutesPopup
+
+RoutesPopup* RoutesPopup::create(MapPopup* map) {
+    auto ret = new RoutesPopup();
+    if (ret->init(map)) {
+        ret->autorelease();
+        return ret;
+    }
+    delete ret;
+    return nullptr;
+}
+
+bool RoutesPopup::init(MapPopup* map) {
+    if (!Popup::init(380.f, 270.f)) return false;
+    m_map = map;
+    this->setTitle("Routes");
+    m_list = CCNode::create();
+    m_mainLayer->addChild(m_list);
+    this->build();
+    return true;
+}
+
+void RoutesPopup::build() {
+    m_list->removeAllChildren();
+    auto& data = levelData(m_map->level());
+    int perPage = 5;
+    int pages = std::max(1, (static_cast<int>(data.routes.size()) + perPage - 1) / perPage);
+    m_page = std::clamp(m_page, 0, pages - 1);
+    auto menu = fixedMenu(m_list);
+
+    if (data.routes.empty()) {
+        auto l = CCLabelBMFont::create("No routes yet.\nChoose a flag on the map and press New route.", "chatFont.fnt");
+        l->setAlignment(kCCTextAlignmentCenter);
+        l->setScale(0.7f);
+        l->setPosition({190.f, 160.f});
+        m_list->addChild(l);
+    }
+    for (int i = m_page * perPage; i < std::min(static_cast<int>(data.routes.size()), (m_page + 1) * perPage); i++) {
+        auto& r = data.routes[i];
+        float y = 212.f - (i - m_page * perPage) * 34.f;
+        bool active = i == data.active;
+        auto bg = CCLayerColor::create(active ? ccColor4B{60, 200, 60, 70} : ccColor4B{0, 0, 0, 70}, 350.f, 30.f);
+        bg->setPosition({15.f, y - 15.f});
+        m_list->addChild(bg);
+        auto name = CCLabelBMFont::create(r.name.c_str(), "bigFont.fnt");
+        name->setAnchorPoint({0.f, 0.5f});
+        name->setPosition({22.f, y + 5.f});
+        name->limitLabelWidth(150.f, 0.38f, 0.1f);
+        m_list->addChild(name);
+        auto info = CCLabelBMFont::create(fmt::format("{}% to {}%   done x{}{}", m_map->pct(r.startX), m_map->pct(r.endX), r.done,
+                                                      active ? "   (active)" : "").c_str(), "chatFont.fnt");
+        info->setAnchorPoint({0.f, 0.5f});
+        info->setScale(0.5f);
+        info->setPosition({22.f, y - 7.f});
+        m_list->addChild(info);
+        put(menu, textButton("Play", "GJ_button_01.png", 0.45f, [this, i](auto) {
+            Ref<MapPopup> map = m_map;
+            this->onClose(nullptr);
+            map->playRoute(i);
+        }), 220.f, y);
+        put(menu, textButton("Rename", "GJ_button_05.png", 0.4f, [this, i](auto) {
+            Ref<RoutesPopup> self = this;
+            auto& d = levelData(m_map->level());
+            if (i >= static_cast<int>(d.routes.size())) return;
+            auto p = NamePopup::create("Route name", d.routes[i].name, [self, i](std::string name) {
+                auto& d2 = levelData(self->m_map->level());
+                if (i >= static_cast<int>(d2.routes.size())) return;
+                if (!name.empty()) d2.routes[i].name = name;
+                d2.save();
+                self->build();
+            });
+            if (p) p->show();
+        }), 280.f, y);
+        put(menu, textButton("X", "GJ_button_06.png", 0.45f, [this, i](auto) {
+            auto& d = levelData(m_map->level());
+            if (i >= static_cast<int>(d.routes.size())) return;
+            d.routes.erase(d.routes.begin() + i);
+            if (d.active == i) d.active = -1;
+            else if (d.active > i) d.active--;
+            d.save();
+            m_map->refreshAll();
+            this->build();
+        }), 345.f, y);
+    }
+    if (pages > 1) {
+        put(menu, arrowButton(false, 0.4f, [this](auto) { m_page--; this->build(); }), 25.f, 120.f);
+        put(menu, arrowButton(true, 0.4f, [this](auto) { m_page++; this->build(); }), 355.f, 120.f);
+    }
+    put(menu, textButton(fmt::format("New route from {}", m_map->selName()).c_str(), "GJ_button_02.png", 0.45f, [this](auto) {
+        Ref<MapPopup> map = m_map;
+        this->onClose(nullptr);
+        map->beginNewRoute();
+    }), 130.f, 28.f);
+    put(menu, textButton("No route", "GJ_button_04.png", 0.45f, [this](auto) {
+        auto& d = levelData(m_map->level());
+        d.active = -1;
+        d.save();
+        m_map->refreshAll();
+        this->build();
+    }), 300.f, 28.f);
+    handleTouchPriority(this);
+}
+
+// ================================================================ SharePopup
+
+SharePopup* SharePopup::create(MapPopup* map) {
+    auto ret = new SharePopup();
+    if (ret->init(map)) {
+        ret->autorelease();
+        return ret;
+    }
+    delete ret;
+    return nullptr;
+}
+
+bool SharePopup::init(MapPopup* map) {
+    if (!Popup::init(300.f, 170.f)) return false;
+    m_map = map;
+    this->setTitle("Share");
+    auto text = CCLabelBMFont::create("Your own StartPos fit in one code.\nPost it in the comments or on Discord.", "chatFont.fnt");
+    text->setAlignment(kCCTextAlignmentCenter);
+    text->setScale(0.6f);
+    text->setPosition({150.f, 118.f});
+    m_mainLayer->addChild(text);
+    auto menu = fixedMenu(m_mainLayer);
+    put(menu, textButton("Copy code", "GJ_button_01.png", 0.55f, [this](auto) { m_map->doCopy(); }), 85.f, 75.f);
+    put(menu, textButton("Paste code", "GJ_button_02.png", 0.55f, [this](auto) {
+        Ref<MapPopup> map = m_map;
+        this->onClose(nullptr);
+        map->doPaste();
+    }), 215.f, 75.f);
+    auto& data = levelData(map->level());
+    if (!data.hidden.empty()) {
+        put(menu, textButton(fmt::format("Bring back deleted ({})", data.hidden.size()).c_str(), "GJ_button_04.png", 0.45f, [this](auto) {
+            Ref<MapPopup> map = m_map;
+            this->onClose(nullptr);
+            map->restoreHidden();
+        }), 150.f, 32.f);
+    }
+    handleTouchPriority(this);
+    return true;
 }

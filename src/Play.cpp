@@ -1,6 +1,6 @@
 #include "Common.hpp"
 #include <Geode/modify/PlayLayer.hpp>
-#include <Geode/modify/GJBaseGameLayer.hpp>
+#include <Geode/modify/PlayerObject.hpp>
 #include <Geode/loader/SettingV3.hpp>
 #include <deque>
 
@@ -54,23 +54,23 @@ class $modify(StudioPlayLayer, PlayLayer) {
 
         Ref<CCDrawNode> deathNode;
 
-        // HUD (top left): percent and goal, clicks per second, clicks this attempt
+        // info at the top left: percent (and route goal), clicks per second, clicks this try
         Ref<CCNode> hud;
         Ref<CCLabelBMFont> hudPercent;
+        Ref<CCLabelBMFont> hudRoute;
         Ref<CCLabelBMFont> hudCps;
         Ref<CCLabelBMFont> hudClicks;
-        Ref<CCLabelBMFont> hudSection;
         Ref<CCLabelBMFont> hudInfo;
         float clock = 0;
         float hudTimer = 1.f;
         std::deque<float> clickTimes;
         int attemptClicks = 0;
 
-        // section: from the StartPos you start on up to its end
-        float sectionStart = 0;
-        float sectionEndX = 0;
-        bool sectionCounts = false;
-        bool sectionReached = false;
+        // route: from its StartPos up to its end, then you start again
+        bool routeOn = false;
+        bool routeReached = false;
+        float routeStart = 0;
+        float routeEnd = 0;
         bool hinted = false;
     };
 
@@ -101,6 +101,7 @@ class $modify(StudioPlayLayer, PlayLayer) {
         StartPosObject* current = m_startPosObject;
         f->starts.clear();
         for (auto& o : f->levelStarts) {
+            if (data.hidden.contains(startKey(o->getPositionX()))) continue;
             LiveStart s;
             s.obj = o;
             int k = static_cast<int>(std::round(o->getPositionX()));
@@ -296,67 +297,53 @@ class $modify(StudioPlayLayer, PlayLayer) {
 
         f->attemptClicks = 0;
         this->ensureWorldNodes();
-        this->setupSection();
+        this->setupRoute();
     }
 
-    void setupSection() {
+    // the route applies when you start on its StartPos
+    void setupRoute() {
         auto f = m_fields.self();
         auto& data = levelData(m_level);
-        float sx = m_startPosObject ? m_startPosObject->getPositionX() : 0.f;
-        std::vector<float> xs;
-        for (auto& s : f->starts) xs.push_back(s.obj->getPositionX());
-        float len = m_levelLength > 0 ? m_levelLength : 1e9f;
-        f->sectionStart = sx;
-        f->sectionEndX = sectionEnd(data, sx, xs, len);
-        f->sectionCounts = std::abs(f->current.startX - sx) < 20.f;
-        f->sectionReached = false;
+        f->routeOn = false;
+        f->routeReached = false;
         f->hudTimer = 1.f;
+        auto r = data.activeRoute();
+        if (!r) return;
+        if (std::abs(f->current.startX - r->startX) > 20.f) return;
+        f->routeOn = true;
+        f->routeStart = r->startX;
+        f->routeEnd = r->endX;
     }
 
-    // you got to the end of your section: it counts as done, and you keep playing
-    void completeSection(bool show) {
+    // end of the route: it counts as done and you go back to its StartPos
+    void routeDone(bool restart) {
         auto f = m_fields.self();
-        if (f->sectionReached) return;
-        f->sectionReached = true;
+        if (f->routeReached) return;
+        f->routeReached = true;
         auto& data = levelData(m_level);
-        int n = ++data.done[sectionKey(f->sectionStart)];
-        data.save();
+        if (auto r = data.activeRoute()) {
+            r->done++;
+            data.save();
+        }
         f->hudTimer = 1.f;
-        if (!show || !m_uiLayer) return;
-        auto win = CCDirector::get()->getWinSize();
-        auto label = CCLabelBMFont::create("SECTION COMPLETE!", "goldFont.fnt");
-        label->setPosition({win.width / 2, win.height / 2 + 40.f});
-        label->setScale(0.1f);
-        m_uiLayer->addChild(label, 100);
-        label->runAction(CCSequence::create(
-            CCEaseBackOut::create(CCScaleTo::create(0.35f, 1.1f)),
-            CCDelayTime::create(0.9f),
-            CCFadeOut::create(0.5f),
-            CCRemoveSelf::create(),
-            nullptr
-        ));
-        auto sub = CCLabelBMFont::create(fmt::format("Done {} {}  -  keep going!", n, n == 1 ? "time" : "times").c_str(), "bigFont.fnt");
-        sub->setPosition({win.width / 2, win.height / 2 + 12.f});
-        sub->setScale(0.4f);
-        sub->setOpacity(0);
-        m_uiLayer->addChild(sub, 100);
-        sub->runAction(CCSequence::create(
-            CCDelayTime::create(0.2f),
-            CCFadeIn::create(0.2f),
-            CCDelayTime::create(1.0f),
-            CCFadeOut::create(0.5f),
-            CCRemoveSelf::create(),
-            nullptr
-        ));
-        FMODAudioEngine::sharedEngine()->playEffect("achievement_01.ogg");
+        if (!restart) return;
+        Ref<PlayLayer> self = this;
+        queueInMainThread([self] {
+            if (PlayLayer::get() != self.data()) return;
+            auto pl = static_cast<StudioPlayLayer*>(self.data());
+            pl->m_currentCheckpoint = nullptr;
+            if (pl->m_isPracticeMode) pl->resetLevelFromStart();
+            pl->resetLevel();
+            pl->startMusic();
+        });
     }
 
-    void checkSection() {
+    void checkRoute() {
         auto f = m_fields.self();
-        if (!f->sectionCounts || f->sectionReached) return;
-        if (m_player1->getPositionX() < f->sectionEndX) return;
-        if (m_levelLength > 0 && f->sectionEndX >= m_levelLength - 5) return;  // the real end: GD shows its own
-        this->completeSection(true);
+        if (!f->routeOn || f->routeReached) return;
+        if (m_player1->getPositionX() < f->routeEnd) return;
+        if (m_levelLength > 0 && f->routeEnd >= m_levelLength - 5) return;  // the real end: GD finishes the level
+        this->routeDone(true);
     }
 
     void finishAttempt(bool died, bool completed) {
@@ -413,7 +400,7 @@ class $modify(StudioPlayLayer, PlayLayer) {
     }
 
     void levelComplete() {
-        if (m_fields->sectionCounts) this->completeSection(false);
+        if (m_fields->routeOn) this->routeDone(false);
         this->finishAttempt(false, true);
         PlayLayer::levelComplete();
     }
@@ -466,7 +453,7 @@ class $modify(StudioPlayLayer, PlayLayer) {
             this->pushSample();
         }
         this->checkStarts();
-        this->checkSection();
+        this->checkRoute();
     }
 
     // auto-fix: compare every StartPos you fly through with your real state there
@@ -536,27 +523,42 @@ class $modify(StudioPlayLayer, PlayLayer) {
 
     void buildHud() {
         auto f = m_fields.self();
-        if (f->hud || !m_uiLayer || !setting("show-hud")) return;
+        if (f->hud) return;
         auto win = CCDirector::get()->getWinSize();
         auto hud = CCNode::create();
         hud->setID("hud"_spr);
         hud->setPosition({6.f, win.height - 6.f});
-        m_uiLayer->addChild(hud, 60);
+        this->addChild(hud, 500);
         f->hud = hud;
-        auto line = [&](float y, float scale) {
+        auto line = [&](float scale) {
             auto l = CCLabelBMFont::create("", "bigFont.fnt");
             l->setAnchorPoint({0.f, 1.f});
             l->setScale(scale);
-            l->setPosition({0.f, y});
             hud->addChild(l);
             return l;
         };
-        f->hudPercent = line(0.f, 0.45f);
-        f->hudCps = line(-18.f, 0.32f);
-        f->hudClicks = line(-31.f, 0.32f);
-        f->hudSection = line(-44.f, 0.3f);
-        f->hudInfo = line(-58.f, 0.3f);
+        f->hudPercent = line(0.45f);
+        f->hudRoute = line(0.3f);
+        f->hudCps = line(0.33f);
+        f->hudClicks = line(0.33f);
+        f->hudInfo = line(0.3f);
         f->hudInfo->setOpacity(0);
+        this->layoutHud();
+    }
+
+    // stacks the lines you turned on, one under the other
+    void layoutHud() {
+        auto f = m_fields.self();
+        if (!f->hud) return;
+        f->hudPercent->setVisible(setting("show-percent"));
+        f->hudRoute->setVisible(setting("show-percent") && f->routeOn);
+        f->hudCps->setVisible(setting("show-cps"));
+        f->hudClicks->setVisible(setting("show-clicks"));
+        float y = 0;
+        for (CCLabelBMFont* l : {f->hudPercent.data(), f->hudRoute.data(), f->hudCps.data(), f->hudClicks.data(), f->hudInfo.data()}) {
+            l->setPosition({0.f, y});
+            if (l->isVisible()) y -= l->getScaledContentSize().height + 3.f;
+        }
     }
 
     void updateHud(float dt) {
@@ -567,22 +569,21 @@ class $modify(StudioPlayLayer, PlayLayer) {
         if (f->hudTimer < 0.1f) return;
         f->hudTimer = 0;
         int now = m_player1 ? this->percentOf(m_player1->getPositionX()) : 0;
-        int goal = (m_levelLength > 0 && f->sectionEndX < m_levelLength - 5) ? this->percentOf(f->sectionEndX) : 100;
-        f->hudPercent->setString(fmt::format("{}%  >  {}%", now, goal).c_str());
-        f->hudPercent->setColor(f->sectionReached ? ccColor3B{90, 255, 90} : ccColor3B{255, 255, 255});
-        f->hudCps->setString(fmt::format("CPS {}", f->clickTimes.size()).c_str());
-        f->hudClicks->setString(fmt::format("Clicks {}", f->attemptClicks).c_str());
-        auto& data = levelData(m_level);
-        int done = 0;
-        if (auto it = data.done.find(sectionKey(f->sectionStart)); it != data.done.end()) done = it->second;
-        if (done > 0) {
-            f->hudSection->setString(fmt::format("Section done x{}", done).c_str());
-            f->hudSection->setColor({90, 255, 90});
+        if (f->routeOn) {
+            f->hudPercent->setString(fmt::format("{}%  >  {}%", now, this->percentOf(f->routeEnd)).c_str());
+            auto& data = levelData(m_level);
+            auto r = data.activeRoute();
+            int done = r ? r->done : 0;
+            std::string name = r ? r->name : std::string();
+            f->hudRoute->setString(fmt::format("{}  done x{}", name, done).c_str());
+            f->hudRoute->setColor({90, 255, 90});
         }
         else {
-            f->hudSection->setString(fmt::format("Goal: reach {}%", goal).c_str());
-            f->hudSection->setColor({255, 220, 120});
+            f->hudPercent->setString(fmt::format("{}%", now).c_str());
         }
+        f->hudCps->setString(fmt::format("CPS {}", f->clickTimes.size()).c_str());
+        f->hudClicks->setString(fmt::format("Clicks {}", f->attemptClicks).c_str());
+        this->layoutHud();
     }
 
     // shows which StartPos you are on for a moment (after switching or placing one)
@@ -602,8 +603,8 @@ class $modify(StudioPlayLayer, PlayLayer) {
         else {
             auto& s = f->starts[idx - 1];
             state = stateOf(s.obj->m_startSettings);
-            text = fmt::format("StartPos {}/{}  {}%  {}{}", idx, n, this->percentOf(s.obj->getPositionX()), describe(state),
-                               s.custom ? " (yours)" : "");
+            text = fmt::format("{} ({}/{})  {}%  {}", startName(levelData(m_level), s.obj->getPositionX(), idx), idx, n,
+                               this->percentOf(s.obj->getPositionX()), describe(state));
         }
         f->hudInfo->setString(text.c_str());
         f->hudInfo->setColor(modeColor(state.mode));
@@ -636,14 +637,15 @@ class $modify(StudioPlayLayer, PlayLayer) {
     }
 };
 
-class $modify(StudioBaseLayer, GJBaseGameLayer) {
-    void handleButton(bool down, int button, bool isPlayer1) {
-        GJBaseGameLayer::handleButton(down, button, isPlayer1);
-        if (!down || button != 1 || !isPlayer1) return;
-        auto pl = PlayLayer::get();
-        if (pl && static_cast<GJBaseGameLayer*>(pl) == static_cast<GJBaseGameLayer*>(this)) {
-            static_cast<StudioPlayLayer*>(pl)->recordClick();
+// every press of the jump button of your icon (mouse, keyboard or controller)
+class $modify(StudioPlayer, PlayerObject) {
+    bool pushButton(PlayerButton button) {
+        bool result = PlayerObject::pushButton(button);
+        if (button == PlayerButton::Jump) {
+            auto pl = PlayLayer::get();
+            if (pl && pl->m_player1 == static_cast<PlayerObject*>(this)) static_cast<StudioPlayLayer*>(pl)->recordClick();
         }
+        return result;
     }
 };
 

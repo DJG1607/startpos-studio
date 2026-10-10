@@ -5,6 +5,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 using namespace geode::prelude;
@@ -40,6 +41,7 @@ struct StartEntry {
     float x = 0, y = 0;
     SPState state;
     bool custom = false;   // placed with this mod
+    std::string name;      // your name for it (empty: "StartPos N")
     bool fixed = false;    // settings corrected by the auto-fix
     int status = 0;        // 0 not checked, 1 checked and right, 2 fixed
 };
@@ -57,16 +59,25 @@ struct LevelData {
     std::vector<SavedStart> custom;
     std::unordered_map<int, SPState> fixes;  // key: rounded x of a level StartPos
     std::unordered_map<int, int> status;     // key: rounded x, 1 right, 2 fixed
-    // sections: every StartPos (and the start of the level, key -1) goes up to an end
-    std::unordered_map<int, float> ends;     // end chosen by you (else: the next StartPos)
-    std::unordered_map<int, int> done;       // times you completed that section
+    std::unordered_map<int, std::string> names;  // key: startKey(x)
+    std::unordered_set<int> hidden;              // level StartPos you deleted (key: startKey(x))
 
+    // routes: a part you want to practise, from a StartPos up to an end (like 60% to 75%)
+    struct Route {
+        std::string name;
+        float startX = 0;
+        float endX = 0;
+        int done = 0;
+    };
+    std::vector<Route> routes;
+    int active = -1;  // the route you are practising (-1: none)
+
+    Route* activeRoute() { return active >= 0 && active < static_cast<int>(routes.size()) ? &routes[active] : nullptr; }
     void save();
 };
 
-int sectionKey(float startX);  // -1 for the start of the level
-// where the section that begins at startX ends: your end, else the next StartPos, else the level end
-float sectionEnd(LevelData const& data, float startX, std::vector<float> const& startXs, float length);
+int startKey(float x);  // -1 for the start of the level
+std::string startName(LevelData const& data, float x, int number);  // your name, or "StartPos N" / "Start"
 
 // One sample of your run.
 struct Sample {
