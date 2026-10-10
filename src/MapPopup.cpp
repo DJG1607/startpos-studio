@@ -252,13 +252,13 @@ void MapPopup::redraw() {
         for (int pc = step; pc < 100; pc += step) {
             float x = m_length * pc / 100.f;
             if (x < minX || x > maxX) continue;
-            Sample const* near = nullptr;
+            Sample const* closest = nullptr;
             float d = 1e9f;
             for (auto& smp : m_line.path) {
-                if (std::abs(smp.x - x) < d) { d = std::abs(smp.x - x); near = &smp; }
+                if (std::abs(smp.x - x) < d) { d = std::abs(smp.x - x); closest = &smp; }
             }
-            if (!near || d > 60.f) continue;
-            auto p = toMap(near->x, near->y);
+            if (!closest || d > 60.f) continue;
+            auto p = toMap(closest->x, closest->y);
             m_draw->drawDot(p, 2.6f, {1, 0.85f, 0.2f, 1});
             auto l = CCLabelBMFont::create(fmt::format("{}%", pc).c_str(), "bigFont.fnt");
             l->setScale(0.26f);
